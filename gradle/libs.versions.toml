@@ -11,6 +11,7 @@ hiltNavigationCompose = "1.2.0"
 coroutines = "1.9.0"
 soraEditor = "0.24.4"
 desugarJdkLibs = "2.1.5"
+termux = "0.118.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -33,6 +34,8 @@ sora-editor-bom = { group = "io.github.rosemoe", name = "editor-bom", version.re
 sora-editor-core = { group = "io.github.rosemoe", name = "editor" }
 sora-language-textmate = { group = "io.github.rosemoe", name = "language-textmate" }
 android-desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugarJdkLibs" }
+termux-terminal-view = { group = "com.termux.termux-app", name = "terminal-view", version.ref = "termux" }
+guava-listenablefuture = { group = "com.google.guava", name = "listenablefuture", version = "9999.0-empty-to-avoid-conflict-with-guava" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Redo
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Undo
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -33,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -57,6 +60,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.androidkris.ide.editor.CodeEditorView
 import com.androidkris.ide.editor.rememberEditorController
+import com.androidkris.ide.terminal.TerminalScreen
 import com.androidkris.ide.workspace.StoragePermission
 import com.androidkris.ide.workspace.TabUi
 import com.androidkris.ide.workspace.TreeNode
@@ -78,6 +82,7 @@ fun WorkspaceScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var showFind by remember { mutableStateOf(false) }
+    var showTerminal by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<FileDialog?>(null) }
     var showFolderPicker by remember { mutableStateOf(false) }
 
@@ -104,6 +109,7 @@ fun WorkspaceScreen(
         if (attached) viewModel.updateContent(state.activeTabId, controller.getText())
     }
 
+    Box(modifier = modifier.fillMaxSize()) {
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -126,7 +132,7 @@ fun WorkspaceScreen(
         },
     ) {
         Scaffold(
-            modifier = modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize(),
             topBar = {
                 TopAppBar(
                     title = { Text(state.projectName.ifEmpty { "AndroidKris IDE" }) },
@@ -147,6 +153,9 @@ fun WorkspaceScreen(
                             if (!showFind) controller.stopSearch()
                         }) {
                             Icon(Icons.Rounded.Search, contentDescription = "Find")
+                        }
+                        IconButton(onClick = { showTerminal = true }) {
+                            Icon(Icons.Rounded.Terminal, contentDescription = "Terminal")
                         }
                         IconButton(
                             onClick = { viewModel.save(state.activeTabId, controller.getText()) },
@@ -198,6 +207,11 @@ fun WorkspaceScreen(
                     }
                 }
             }
+        }
+    }
+
+        if (showTerminal) {
+            TerminalOverlay(onClose = { showTerminal = false })
         }
     }
 
@@ -301,6 +315,33 @@ private fun EmptyState(loading: Boolean, onOpenTree: () -> Unit) {
                 style = MaterialTheme.typography.titleMedium,
             )
             TextButton(onClick = onOpenTree) { Text("Buka file explorer") }
+        }
+    }
+}
+
+/** Full-screen terminal overlay (Fase 2.0) running the Android system shell. */
+@Composable
+private fun TerminalOverlay(onClose: () -> Unit) {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            ) {
+                Text(
+                    "Terminal",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Tutup terminal")
+                }
+            }
+            TerminalScreen(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                onSessionEnd = onClose,
+            )
         }
     }
 }

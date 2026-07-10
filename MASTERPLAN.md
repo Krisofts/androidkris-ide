@@ -107,10 +107,23 @@ build diambil di akhir Fase 3, bukan sekarang.
 masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila perlu.
 
 ### Fase 2 — Terminal + environment Linux (3–6 minggu)
-- [ ] Integrasi komponen **Termux** (`terminal-emulator` + `terminal-view`) → terminal fungsional.
-- [ ] Bootstrap rootfs mini (busybox/proot atau native exec) supaya ada shell + coreutils.
-- [ ] Pasang **prebuilt JDK 17 aarch64** ke dalam data app; `java -version` jalan di terminal.
-- **Milestone: bisa buka terminal, jalankan `java`, `sh`, edit lalu jalankan skrip.**
+
+**Fase 2.0 ✅ (terminal + shell sistem):**
+- [x] Integrasi komponen **Termux** via JitPack (`com.termux.termux-app:terminal-view:0.118.0`,
+      tarik `terminal-emulator` transitif; JNI arm64). Modul `:terminal`:
+      `TerminalScreen` (AndroidView host `TerminalView`) + `TerminalSessionClientImpl` +
+      `TerminalViewClientImpl` + baris **extra-keys** (ESC/TAB/^C/^D/panah, dibangun dari
+      `Char(code)` — tanpa control char mentah di source).
+- [x] Menjalankan **shell sistem Android** (`/system/bin/sh`) — tanpa bootstrap, jalan di device
+      arm64 apa pun. Dibuka via ikon Terminal di top bar → overlay layar penuh (`TerminalOverlay`).
+- **Milestone 2.0 tercapai: terminal fungsional, bisa `ls`/`cd`/`cat`/`sh` di HP.**
+
+**Fase 2.1 (belum — jauh lebih berat):**
+- [ ] Bootstrap **rootfs Linux mini** (proot / busybox) → coreutils, paket, `apt`-like.
+- [ ] Pasang **prebuilt JDK 17 aarch64** ke data app; `java -version` jalan.
+- [ ] `PATH` mengarah ke toolchain agar `java`/`gradle` (nanti Fase 3) reachable dari terminal.
+- **Catatan:** shell sistem hanya punya util Android (toybox), bukan environment Linux penuh —
+      itulah kenapa Fase 2.1 (rootfs + JDK) diperlukan sebelum Fase 3 (Gradle sync).
 
 ### Fase 3 — Gradle sync (project model) (4–8 minggu) ⚠️ tersulit
 - [ ] Pasang **Gradle aarch64 + Android build-tools + platform jar** dari distribusi AndroidIDE.
