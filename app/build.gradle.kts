@@ -13,7 +13,11 @@ android {
     defaultConfig {
         applicationId = "com.androidkris.ide"
         minSdk = 26
-        targetSdk = 35
+        // targetSdk 28 (like Termux/AndroidIDE): required so the app may execute the
+        // bootstrap toolchain (bash/JDK/Gradle) from its own data dir. Android 10+ (API 29+)
+        // targets are denied exec on app_data_file (SELinux W^X), which would make on-device
+        // builds impossible. Trade-off: legacy external-storage model (handled in StoragePermission).
+        targetSdk = 28
         versionCode = 1
         versionName = "0.1.0-alpha"
 

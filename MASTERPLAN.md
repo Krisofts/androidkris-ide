@@ -118,12 +118,21 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
       arm64 apa pun. Dibuka via ikon Terminal di top bar → overlay layar penuh (`TerminalOverlay`).
 - **Milestone 2.0 tercapai: terminal fungsional, bisa `ls`/`cd`/`cat`/`sh` di HP.**
 
-**Fase 2.1 (belum — jauh lebih berat):**
-- [ ] Bootstrap **rootfs Linux mini** (proot / busybox) → coreutils, paket, `apt`-like.
-- [ ] Pasang **prebuilt JDK 17 aarch64** ke data app; `java -version` jalan.
-- [ ] `PATH` mengarah ke toolchain agar `java`/`gradle` (nanti Fase 3) reachable dari terminal.
-- **Catatan:** shell sistem hanya punya util Android (toybox), bukan environment Linux penuh —
-      itulah kenapa Fase 2.1 (rootfs + JDK) diperlukan sebelum Fase 3 (Gradle sync).
+**Fase 2.1a 🔨 (bootstrap Linux — sedang diuji):** dipilih **Opsi C** (reuse toolchain AndroidIDE).
+- [x] **`targetSdk` diturunkan ke 28** — WAJIB: Android 29+ melarang exec binari dari data app
+      (SELinux W^X); AndroidIDE (targetSdk 28) & Termux pun begitu. Efek: model storage legacy
+      (folder-picker eksternal Fase 1.1 perlu penyesuaian ulang — **known gap** sementara).
+- [x] `Environment` (path `$PREFIX/$HOME/bin/lib/tmp`, builder env) + `BootstrapInstaller`
+      (unduh bootstrap AndroidIDE `terminal-packages` bootstrap-16.12.2023 aarch64 26MB, verifikasi
+      SHA-256, ekstrak + `Os.chmod 0700` + proses `SYMLINKS.txt` via `Os.symlink`, pindah ke prefix).
+- [x] `TerminalHost`: layar setup (progres unduh/ekstrak + **error di layar** + retry) → jalankan
+      **login bash** (`$PREFIX/bin/bash -bash`) dengan env; fallback shell sistem.
+- **Sumber:** `github.com/AndroidIDEOfficial/terminal-packages`. **Butuh iterasi di device** (exec/
+      linker/symlink) — dibangun dengan error surfacing + crash reporter karena user sedang remote.
+
+**Fase 2.1b (berikutnya, setelah bootstrap terverifikasi):**
+- [ ] Pasang **JDK 17 aarch64** (paket AndroidIDE) → `java -version` jalan.
+- [ ] Pasang **Gradle** + Android SDK/build-tools bionic → prasyarat Fase 3 (Gradle sync).
 
 ### Fase 3 — Gradle sync (project model) (4–8 minggu) ⚠️ tersulit
 - [ ] Pasang **Gradle aarch64 + Android build-tools + platform jar** dari distribusi AndroidIDE.

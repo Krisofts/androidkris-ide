@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Download the Linux bootstrap (bash + coreutils) at first terminal use. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Full-filesystem access so users can open any project folder (like AndroidIDE).
          Android 11+ uses All-Files-Access; older APIs fall back to legacy storage. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />

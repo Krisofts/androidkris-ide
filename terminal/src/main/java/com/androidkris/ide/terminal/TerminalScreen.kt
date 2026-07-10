@@ -30,6 +30,10 @@ import com.termux.view.TerminalView
 @Composable
 fun TerminalScreen(
     modifier: Modifier = Modifier,
+    shellPath: String = "/system/bin/sh",
+    workingDir: String? = null,
+    env: Array<String>? = null,
+    args: Array<String>? = null,
     textSizeSp: Int = 14,
     onSessionEnd: () -> Unit = {},
 ) {
@@ -51,15 +55,17 @@ fun TerminalScreen(
                     TerminalViewClientImpl(baseTextSizePx = textPx, onTap = { showKeyboard(ctx, view) })
                 )
 
-                val home = ctx.filesDir.absolutePath
-                val env = arrayOf(
-                    "HOME=$home",
+                val cwd = workingDir ?: ctx.filesDir.absolutePath
+                val shellEnv = env ?: arrayOf(
+                    "HOME=${ctx.filesDir.absolutePath}",
                     "PATH=/system/bin:/system/xbin",
                     "TERM=xterm-256color",
                     "LANG=en_US.UTF-8",
                 )
+                // argv is built entirely from args by the native layer; ensure argv[0] is set.
+                val shellArgs = args ?: arrayOf(shellPath.substringAfterLast('/'))
                 val session = TerminalSession(
-                    "/system/bin/sh", home, null, env, null,
+                    shellPath, cwd, shellArgs, shellEnv, null,
                     TerminalSessionClientImpl(
                         onScreenUpdated = { view.onScreenUpdated() },
                         onFinished = { onSessionEnd() },

@@ -60,7 +60,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.androidkris.ide.editor.CodeEditorView
 import com.androidkris.ide.editor.rememberEditorController
-import com.androidkris.ide.terminal.TerminalScreen
+import com.androidkris.ide.terminal.TerminalHost
 import com.androidkris.ide.workspace.StoragePermission
 import com.androidkris.ide.workspace.TabUi
 import com.androidkris.ide.workspace.TreeNode
@@ -338,9 +338,9 @@ private fun TerminalOverlay(onClose: () -> Unit) {
                     Icon(Icons.Rounded.Close, contentDescription = "Tutup terminal")
                 }
             }
-            TerminalScreen(
+            TerminalHost(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                onSessionEnd = onClose,
+                onClose = onClose,
             )
         }
     }
