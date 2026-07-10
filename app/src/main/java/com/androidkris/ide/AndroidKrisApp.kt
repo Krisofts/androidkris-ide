@@ -1,6 +1,7 @@
 package com.androidkris.ide
 
 import android.app.Application
+import com.androidkris.ide.crash.CrashReporter
 import dagger.hilt.android.HiltAndroidApp
 
 /**
@@ -10,4 +11,10 @@ import dagger.hilt.android.HiltAndroidApp
  * connection cache (Fase 3+) from here on a background dispatcher.
  */
 @HiltAndroidApp
-class AndroidKrisApp : Application()
+class AndroidKrisApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        // Show uncaught crashes on-screen (copyable) instead of a bare force-close.
+        CrashReporter.install(this)
+    }
+}

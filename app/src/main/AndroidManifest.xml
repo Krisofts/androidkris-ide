@@ -34,5 +34,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Crash reporter runs in its own process so it survives the main process dying. -->
+        <activity
+            android:name=".crash.CrashActivity"
+            android:exported="false"
+            android:process=":crash"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.AndroidKrisIDE" />
     </application>
 </manifest>
