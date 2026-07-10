@@ -131,11 +131,35 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
       cell default (hitam) tembus ke `Surface` putih Compose di baliknya → teks putih default jadi
       tak terbaca ("blank" palsu). Fix: `setBackgroundColor(Color.BLACK)` di `TerminalScreen.kt`.
 - **Milestone 2.1a tercapai: `bash-5.2$` jalan nyata di device, prompt terbaca.**
-- **Sumber:** `github.com/AndroidIDEOfficial/terminal-packages`.
+- **Sumber:** `github.com/AndroidIDEOfficial/terminal-packages` (bootstrap lama, tetap dipakai
+      untuk histori — **AndroidIDE resmi discontinued** Des 2024, org di-archive, tidak ada
+      update lagi).
 
-**Fase 2.1b (berikutnya, setelah bootstrap terverifikasi):**
-- [ ] Pasang **JDK 17 aarch64** (paket AndroidIDE) → `java -version` jalan.
-- [ ] Pasang **Gradle** + Android SDK/build-tools bionic → prasyarat Fase 3 (Gradle sync).
+**Fase 2.1b 🔨 (apt/dpkg + JDK/Gradle — sedang diuji):** pivot sumber bootstrap karena AndroidIDE mati.
+- [x] **Ganti sumber bootstrap ke Termux resmi** (`termux/termux-packages`, rilis mingguan aktif),
+      superset dari yang lama: bash + coreutils **+ apt/dpkg/curl/nano/gpgv**. `BOOTSTRAP_URL`/
+      `BOOTSTRAP_SHA256` di `Environment.kt` diupdate ke `bootstrap-2026.07.05-r1+apt.android-7`
+      (diverifikasi SHA-256 manual, ukuran ~30 MB).
+- [x] **Ditemukan & di-fix sebelum ke device:** bootstrap Termux resmi dibuild untuk prefix
+      tetap `/data/data/com.termux/files/usr` (app Termux sendiri), bukan prefix relokatable
+      seperti build AndroidIDE. Dua dampak, dua fix di `BootstrapInstaller.kt`:
+      1. 20 entri di `SYMLINKS.txt` (keyring GPG apt, alias busybox-style) pakai absolute path
+         ke prefix Termux → di-retarget ke prefix kita saat parsing (`extract()`).
+      2. `apt`/`dpkg` (beda dari `bash`) tidak fallback ke env var `$PREFIX` untuk `Dir::Bin::Methods`
+         dkk — di-generate `etc/apt/apt.conf.d/00androidkris-prefix.conf` yang override semua
+         `Dir::*` ke prefix kita (`writeAptPrefixOverride()`), plus siapkan folder
+         `var/lib/apt/lists/partial`, `var/cache/apt/archives/partial`, dll yang tidak ada di zip.
+- [ ] **Belum diverifikasi di device** — install ulang bootstrap (hapus data app / uninstall,
+      karena `Environment.isInstalled` cuma cek `bash.canExecute()` jadi tidak otomatis
+      reinstall), lalu di terminal coba:
+      `apt update && apt install -y openjdk-17` → cek apakah `Dir::*` override cukup atau ada
+      hardcode lain yang belum ketemu (gpgv verifikasi signature Release file jadi titik rawan
+      berikutnya kalau keyring retarget di atas ternyata belum cukup).
+- [ ] Setelah `java -version` jalan: pasang **Gradle** (paket Termux `gradle` 9.6.1, butuh JDK 21
+      sebagai dependency menurut build script-nya — cek ulang versi JDK yang dibutuhkan) →
+      prasyarat Fase 3 (Gradle sync). Android SDK/build-tools aarch64 menyusul terpisah (Termux
+      tidak menyediakan ini, masih perlu cari sumber lain karena AndroidIDE sudah mati).
+- **Sumber:** `github.com/termux/termux-packages` (aktif, rilis mingguan).
 
 ### Fase 3 — Gradle sync (project model) (4–8 minggu) ⚠️ tersulit
 - [ ] Pasang **Gradle aarch64 + Android build-tools + platform jar** dari distribusi AndroidIDE.

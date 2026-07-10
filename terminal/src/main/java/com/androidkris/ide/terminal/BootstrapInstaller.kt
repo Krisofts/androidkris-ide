@@ -24,15 +24,22 @@ sealed interface BootstrapState {
 }
 
 /**
- * Downloads AndroidIDE's prebuilt bionic bootstrap (bash + coreutils) and
- * extracts it into [Environment.prefix], replicating Termux's install:
- * stage → chmod 0700 each file → apply SYMLINKS.txt via `Os.symlink` → move
- * staging into place. All work runs on IO; failures surface via [BootstrapState.Failed].
+ * Downloads Termux's official prebuilt bionic bootstrap (bash + coreutils + apt/dpkg) and
+ * extracts it into [Environment.prefix], replicating Termux's own install: stage → chmod 0700
+ * each file → apply SYMLINKS.txt via `Os.symlink` (retargeting the handful of entries that
+ * hardcode Termux's own absolute prefix) → move staging into place → write an apt.conf.d
+ * override so apt/dpkg's own compiled-in absolute paths point at our prefix too. All work
+ * runs on IO; failures surface via [BootstrapState.Failed].
  */
 object BootstrapInstaller {
 
     private val SYMLINK_SEPARATOR = Char(0x2190) // '←' U+2190, Termux SYMLINKS.txt delimiter
     private const val MODE_0700 = 448            // "700".toInt(8)
+
+    // Termux's official bootstrap is built for its own app, so a handful of SYMLINKS.txt
+    // entries (apt/gpg keyrings, a few busybox-style aliases) and a couple of binaries (apt,
+    // dpkg) hardcode this absolute path at compile time instead of using a relative one.
+    private const val TERMUX_HARDCODED_PREFIX = "/data/data/com.termux/files/usr"
 
     suspend fun install(context: Context, onProgress: (BootstrapState) -> Unit) =
         withContext(Dispatchers.IO) {
@@ -47,6 +54,7 @@ object BootstrapInstaller {
                 onProgress(BootstrapState.Extracting)
                 extract(zip)
                 zip.delete()
+                writeAptPrefixOverride()
 
                 Environment.ensureRuntimeDirs()
                 onProgress(BootstrapState.Done)
@@ -113,7 +121,14 @@ object BootstrapInstaller {
                         if (parts.size != 2) throw RuntimeException("SYMLINKS.txt rusak: $line")
                         val newPath = File(staging, parts[1])
                         newPath.parentFile?.mkdirs()
-                        symlinks.add(parts[0] to newPath.absolutePath)
+                        // A few entries point at Termux's own absolute prefix; retarget those
+                        // at ours so the symlink isn't dangling once staging becomes `prefix`.
+                        val oldPath = if (parts[0].startsWith(TERMUX_HARDCODED_PREFIX)) {
+                            Environment.prefix.absolutePath + parts[0].removePrefix(TERMUX_HARDCODED_PREFIX)
+                        } else {
+                            parts[0]
+                        }
+                        symlinks.add(oldPath to newPath.absolutePath)
                         line = reader.readLine()
                     }
                 } else {
@@ -137,6 +152,35 @@ object BootstrapInstaller {
         if (prefix.exists()) prefix.deleteRecursively()
         prefix.parentFile?.mkdirs()
         if (!staging.renameTo(prefix)) throw RuntimeException("Gagal memindah staging ke prefix")
+    }
+
+    /**
+     * `apt`/`dpkg` compile in `Dir::*` defaults pointing at Termux's own absolute prefix
+     * (unlike bash, they don't fall back to our env vars). apt.conf.d overrides are the
+     * standard way to relocate them — untested end-to-end on device yet.
+     */
+    private fun writeAptPrefixOverride() {
+        val prefix = Environment.prefix.absolutePath
+        val confDir = File(Environment.prefix, "etc/apt/apt.conf.d")
+        confDir.mkdirs()
+        File(confDir, "00androidkris-prefix.conf").writeText(
+            """
+            Dir "$prefix/";
+            Dir::Bin::Methods "$prefix/lib/apt/methods/";
+            Dir::Bin::dpkg "$prefix/bin/dpkg";
+            Dir::Etc "$prefix/etc/apt/";
+            Dir::State "$prefix/var/lib/apt/";
+            Dir::State::status "$prefix/var/lib/dpkg/status";
+            Dir::Cache "$prefix/var/cache/apt/";
+            Dir::Log "$prefix/var/log/apt/";
+
+            """.trimIndent()
+        )
+        File(Environment.prefix, "etc/dpkg").mkdirs()
+        File(Environment.prefix, "var/lib/dpkg").mkdirs()
+        File(Environment.prefix, "var/lib/apt/lists/partial").mkdirs()
+        File(Environment.prefix, "var/cache/apt/archives/partial").mkdirs()
+        File(Environment.prefix, "var/log/apt").mkdirs()
     }
 
     private fun cleanup() {

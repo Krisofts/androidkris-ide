@@ -117,7 +117,7 @@ private fun BootstrapSetup(
                 modifier = Modifier.padding(top = 12.dp),
             )
             Text(
-                "Untuk shell Linux penuh (bash + coreutils), unduh environment sekali (±26 MB). " +
+                "Untuk shell Linux penuh (bash + coreutils + apt), unduh environment sekali (±30 MB). " +
                     "Tanpa ini, tersedia shell sistem Android yang terbatas.",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
@@ -132,7 +132,7 @@ private fun BootstrapSetup(
                         scope.launch {
                             BootstrapInstaller.install(context) { st -> state = st }
                         }
-                    }) { Text("Unduh & pasang (26 MB)") }
+                    }) { Text("Unduh & pasang (30 MB)") }
                     TextButton(onClick = onUseSystemShell) { Text("Pakai shell sistem dulu") }
                     if (s is BootstrapState.Failed) {
                         Text(

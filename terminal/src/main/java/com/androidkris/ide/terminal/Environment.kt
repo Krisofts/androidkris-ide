@@ -58,9 +58,13 @@ object Environment {
         "LANG=en_US.UTF-8",
     )
 
-    // AndroidIDE's prebuilt bionic bootstrap (bash + coreutils), aarch64.
+    // Termux's own official bootstrap, aarch64 (bash + coreutils + apt/dpkg/curl/nano/...).
+    // AndroidIDE (previously used here) was discontinued in Dec 2024 (org archived); Termux's
+    // own bootstrap is still built weekly and is a superset (adds apt/dpkg, needed for Fase
+    // 2.1b). A handful of apt/dpkg paths are hardcoded to Termux's own prefix at compile time
+    // — see BootstrapInstaller's symlink retargeting + generated apt.conf override.
     const val BOOTSTRAP_URL =
-        "https://github.com/AndroidIDEOfficial/terminal-packages/releases/download/bootstrap-16.12.2023/bootstrap-aarch64.zip"
+        "https://github.com/termux/termux-packages/releases/download/bootstrap-2026.07.05-r1+apt.android-7/bootstrap-aarch64.zip"
     const val BOOTSTRAP_SHA256 =
-        "68da03ed270d59cafcd37981b00583c713b42cb440adf03d1bf980f39a55181d"
+        "e976289d117a94f6acc969096d8e3c01d54a53024416cd0279d84cac11458ab8"
 }
