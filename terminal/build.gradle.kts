@@ -32,7 +32,8 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
 
     // Termux terminal emulator + view (pulls terminal-emulator transitively; ships arm64 JNI).
+    // NOTE: do NOT add the guava `listenablefuture:9999.0-empty-to-avoid-conflict-with-guava`
+    // artifact here — terminal-view pulls no Guava, so that empty stub only *removes* the real
+    // ListenableFuture class and breaks androidx.concurrent.futures / ProfileInstaller at runtime.
     implementation(libs.termux.terminal.view)
-    // Avoids duplicate-class clash between Guava and its listenablefuture split.
-    implementation(libs.guava.listenablefuture)
 }
