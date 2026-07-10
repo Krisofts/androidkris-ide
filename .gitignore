@@ -1,0 +1,25 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/*/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Signing (keep OUT of the repo)
+keystore.properties
+*.jks
+*.keystore
+
+# On-device toolchain / large binaries fetched at runtime (Fase 2+)
+/toolchain-cache/
+
+# build logs
+build.log
+
+# Kotlin compiler working dir
+.kotlin/

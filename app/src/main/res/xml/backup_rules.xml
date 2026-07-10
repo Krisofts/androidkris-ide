@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API < 31 backup config. Exclude on-device toolchain + caches (large, arm64-specific,
+     re-downloadable) from cloud backup once Fase 2+ installs them. -->
+<full-backup-content>
+    <!-- <exclude domain="file" path="toolchain/" /> -->
+</full-backup-content>
