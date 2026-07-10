@@ -118,7 +118,7 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
       arm64 apa pun. Dibuka via ikon Terminal di top bar → overlay layar penuh (`TerminalOverlay`).
 - **Milestone 2.0 tercapai: terminal fungsional, bisa `ls`/`cd`/`cat`/`sh` di HP.**
 
-**Fase 2.1a 🔨 (bootstrap Linux — sedang diuji):** dipilih **Opsi C** (reuse toolchain AndroidIDE).
+**Fase 2.1a ✅ (bootstrap Linux — terverifikasi di device):** dipilih **Opsi C** (reuse toolchain AndroidIDE).
 - [x] **`targetSdk` diturunkan ke 28** — WAJIB: Android 29+ melarang exec binari dari data app
       (SELinux W^X); AndroidIDE (targetSdk 28) & Termux pun begitu. Efek: model storage legacy
       (folder-picker eksternal Fase 1.1 perlu penyesuaian ulang — **known gap** sementara).
@@ -127,8 +127,11 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
       SHA-256, ekstrak + `Os.chmod 0700` + proses `SYMLINKS.txt` via `Os.symlink`, pindah ke prefix).
 - [x] `TerminalHost`: layar setup (progres unduh/ekstrak + **error di layar** + retry) → jalankan
       **login bash** (`$PREFIX/bin/bash -bash`) dengan env; fallback shell sistem.
-- **Sumber:** `github.com/AndroidIDEOfficial/terminal-packages`. **Butuh iterasi di device** (exec/
-      linker/symlink) — dibangun dengan error surfacing + crash reporter karena user sedang remote.
+- [x] **Bug ditemukan & di-fix di device:** `TerminalView` dibuat tanpa background eksplisit →
+      cell default (hitam) tembus ke `Surface` putih Compose di baliknya → teks putih default jadi
+      tak terbaca ("blank" palsu). Fix: `setBackgroundColor(Color.BLACK)` di `TerminalScreen.kt`.
+- **Milestone 2.1a tercapai: `bash-5.2$` jalan nyata di device, prompt terbaca.**
+- **Sumber:** `github.com/AndroidIDEOfficial/terminal-packages`.
 
 **Fase 2.1b (berikutnya, setelah bootstrap terverifikasi):**
 - [ ] Pasang **JDK 17 aarch64** (paket AndroidIDE) → `java -version` jalan.
