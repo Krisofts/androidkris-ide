@@ -50,6 +50,10 @@ fun TerminalScreen(
                     setTypeface(Typeface.MONOSPACE)
                     isFocusable = true
                     isFocusableInTouchMode = true
+                    // TerminalRenderer only paints non-default cell backgrounds; without an
+                    // opaque view background the default (black) cells show the app's own
+                    // Surface through them, so default-white text becomes invisible on it.
+                    setBackgroundColor(android.graphics.Color.BLACK)
                 }
                 view.setTerminalViewClient(
                     TerminalViewClientImpl(baseTextSizePx = textPx, onTap = { showKeyboard(ctx, view) })
