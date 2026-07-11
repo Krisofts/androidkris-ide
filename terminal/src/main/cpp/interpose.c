@@ -19,6 +19,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 static const char *const OLD_PREFIX = "/data/data/com.termux/files/usr";
@@ -242,6 +244,58 @@ ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
     if (real == NULL) real = (readlink_fn)dlsym(RTLD_NEXT, "readlink");
     char *rewritten = rewrite_path(path);
     ssize_t r = real(rewritten != NULL ? rewritten : path, buf, bufsiz);
+    free(rewritten);
+    return r;
+}
+
+// dpkg-deb hardcodes a temp-directory path under Termux's prefix independently of $TMPDIR
+// for at least one internal case (control-member extraction) — chdir() there is what actually
+// surfaced it ("dpkg-deb (subprocess): failed to chdir to directory: Permission denied").
+typedef int (*chdir_fn)(const char *);
+int chdir(const char *path) {
+    static chdir_fn real = NULL;
+    if (real == NULL) real = (chdir_fn)dlsym(RTLD_NEXT, "chdir");
+    char *rewritten = rewrite_path(path);
+    int r = real(rewritten != NULL ? rewritten : path);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*chown_fn)(const char *, uid_t, gid_t);
+int chown(const char *path, uid_t owner, gid_t group) {
+    static chown_fn real = NULL;
+    if (real == NULL) real = (chown_fn)dlsym(RTLD_NEXT, "chown");
+    char *rewritten = rewrite_path(path);
+    int r = real(rewritten != NULL ? rewritten : path, owner, group);
+    free(rewritten);
+    return r;
+}
+
+int lchown(const char *path, uid_t owner, gid_t group) {
+    static chown_fn real = NULL;
+    if (real == NULL) real = (chown_fn)dlsym(RTLD_NEXT, "lchown");
+    char *rewritten = rewrite_path(path);
+    int r = real(rewritten != NULL ? rewritten : path, owner, group);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*truncate_fn)(const char *, off_t);
+int truncate(const char *path, off_t length) {
+    static truncate_fn real = NULL;
+    if (real == NULL) real = (truncate_fn)dlsym(RTLD_NEXT, "truncate");
+    char *rewritten = rewrite_path(path);
+    int r = real(rewritten != NULL ? rewritten : path, length);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*utimes_fn)(const char *, const struct timeval[2]);
+int utimes(const char *path, const struct timeval times[2]) {
+    static utimes_fn real = NULL;
+    if (real == NULL) real = (utimes_fn)dlsym(RTLD_NEXT, "utimes");
+    char *rewritten = rewrite_path(path);
+    int r = real(rewritten != NULL ? rewritten : path, times);
     free(rewritten);
     return r;
 }
