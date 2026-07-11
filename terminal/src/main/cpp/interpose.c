@@ -51,13 +51,28 @@ __attribute__((constructor)) static void interpose_init(void) {
 }
 
 // Resolves `path` to an absolute path (using our tracked cwd if it's relative) and returns a
-// malloc'd redirected path if that absolute form falls at-or-under OLD_PREFIX (normal case:
-// append the OLD_PREFIX-relative suffix onto new_prefix) or is a proper *ancestor* of
-// OLD_PREFIX (dpkg checking/creating "/data", then "/data/data", etc. on the way to the real
-// target — collapse all of those to new_prefix itself, since new_prefix already exists and is
-// ours to write to; dpkg only cares that the call succeeds so it can proceed one level
-// deeper). Returns NULL (meaning: use the original path unchanged) if neither applies.
-// Caller must free() a non-NULL result.
+// malloc'd redirected path if that absolute form relates to OLD_PREFIX, else NULL (meaning:
+// use the original path unchanged, which then hits Android's real, inaccessible
+// /data/data/com.termux and fails with EACCES — safe, if occasionally blocking, since nothing
+// of ours gets touched). Caller must free() a non-NULL result.
+//
+// Two cases:
+//   1. `resolved` is at-or-under OLD_PREFIX exactly (the common case: an actual file/dir under
+//      the target) — append the OLD_PREFIX-relative suffix onto new_prefix. Requires a
+//      component boundary on *both* sides, so e.g. ".../usr" doesn't wrongly match
+//      ".../usracme".
+//   2. `resolved` is *exactly* one of OLD_PREFIX's own ancestor directories, with nothing else
+//      appended ("/data", "/data/data", "/data/data/com.termux", ...) — dpkg confirming/
+//      creating an intermediate directory on the way down. Collapses straight to new_prefix
+//      (no suffix), since new_prefix already exists and is ours to write to, and dpkg only
+//      needs the call to succeed so it can proceed one level deeper.
+//
+// Deliberately narrow: a path that's an ancestor *plus some other suffix* (e.g. dpkg's
+// "securely remove by rename" trick, "/data/data/com.termux/files" ->
+// ".../files.dpkg-tmp") is NOT redirected, even though it looks similar. Collapsing every
+// ancestor-shaped path to new_prefix would mean a rename-then-recursive-delete of an ancestor
+// resolves to renaming-then-deleting new_prefix *itself* — i.e. wiping the entire bootstrap.
+// Better to let that one case fail loudly than risk destroying the user's install.
 static char *rewrite_path(const char *path) {
     if (path == NULL || new_prefix == NULL) return NULL;
 
