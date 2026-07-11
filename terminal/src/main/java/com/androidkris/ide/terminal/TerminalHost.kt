@@ -139,9 +139,15 @@ private fun BootstrapSetup(
             when (val s = state) {
                 is BootstrapState.Idle, is BootstrapState.Failed -> {
                     Button(onClick = {
-                        state = BootstrapState.Downloading(0f)
-                        scope.launch {
-                            BootstrapInstaller.install(context) { st -> state = st }
+                        // Belt-and-suspenders alongside BootstrapInstaller's own Mutex: flip
+                        // state away from Idle/Failed synchronously so a rapid double-tap
+                        // landing before recomposition swaps out this Button can't fire a
+                        // second install() call in the same frame.
+                        if (state is BootstrapState.Idle || state is BootstrapState.Failed) {
+                            state = BootstrapState.Downloading(0f)
+                            scope.launch {
+                                BootstrapInstaller.install(context) { st -> state = st }
+                            }
                         }
                     }) { Text("Unduh & pasang (30 MB)") }
                     TextButton(onClick = onUseSystemShell) { Text("Pakai shell sistem dulu") }

@@ -3,6 +3,7 @@ package com.androidkris.ide.terminal
 import android.content.Context
 import android.system.Os
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.File
@@ -36,8 +37,26 @@ object BootstrapInstaller {
     private val SYMLINK_SEPARATOR = Char(0x2190) // '←' U+2190, Termux SYMLINKS.txt delimiter
     private const val MODE_0700 = 448            // "700".toInt(8)
 
+    // Guards against two concurrent install() runs stomping on each other. This is not just a
+    // double-tap nicety: extract() unconditionally does `if (prefix.exists()) deleteRecursively()`
+    // before renaming staging into place, so a second run finishing *after* a first run has
+    // already gone Done (and the user is now running bash out of that prefix) deletes the live,
+    // already-in-use prefix out from under the running shell — the shell process itself keeps
+    // running (its binary is already mapped into memory), but every new path lookup in it
+    // ("$PREFIX" itself, "$PREFIX/bin", `pkg`, ...) then fails with ENOENT, which looks exactly
+    // like "the fresh install silently produced an empty prefix". A plain boolean flag isn't
+    // enough here because withContext(Dispatchers.IO) doesn't cooperatively cancel blocking file
+    // I/O when the caller's CoroutineScope is torn down (e.g. the user backs out of the setup
+    // screen mid-install) — the old run can keep executing on an IO thread and race a fresh one
+    // started later. tryLock() makes the second caller fail fast instead of racing.
+    private val installLock = Mutex()
+
     suspend fun install(context: Context, onProgress: (BootstrapState) -> Unit) =
         withContext(Dispatchers.IO) {
+            if (!installLock.tryLock()) {
+                onProgress(BootstrapState.Failed("Instalasi lain sedang berjalan, tunggu sampai selesai"))
+                return@withContext
+            }
             try {
                 Environment.init(context)
                 val zip = File(context.cacheDir, "bootstrap-aarch64.zip")
@@ -56,6 +75,8 @@ object BootstrapInstaller {
             } catch (t: Throwable) {
                 runCatching { cleanup() }
                 onProgress(BootstrapState.Failed("${t.javaClass.simpleName}: ${t.message}"))
+            } finally {
+                installLock.unlock()
             }
         }
 

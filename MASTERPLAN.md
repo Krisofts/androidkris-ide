@@ -220,7 +220,40 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
       **root prefix kita sendiri** (yang sudah pasti ada & bisa ditulis), supaya panggilannya
       sukses dan dpkg lanjut ke level berikutnya. `apt.conf`: baris `Dir` (root) dihapus permanen
       (root dpkg dibiarkan default `/`, sesuai desain Termux, ditangani penuh oleh shim).
-- [ ] **Belum diverifikasi di device.**
+- [x] **Diuji di device (putaran 6):** lolos jauh lebih jauh, sampai `unpack` 39 paket. Gagal baru:
+      `unable to securely remove '.../var/lib/dpkg/files.dpkg-tmp'` — ini pembersihan defensif dpkg
+      sendiri sebelum nulis (`path_remove_tree` di `archives.c`), berdiri sendiri, **bukan** bagian
+      dari `rename()` di run yang sama. Aman dialihkan **hanya untuk pemanggil read-only/remove**
+      (`stat`/`lstat`/`access`/`unlink`/`rmdir`/`opendir`/`scandir`/`*at()` versinya), **tidak
+      pernah** untuk `rename`/`link`/`symlink`/`open` (kalau leluhur-plus-suffix dialihkan di situ,
+      `rename()` bisa memindah **lalu hapus rekursif seluruh prefix** — sempat kepikiran fix umum
+      begini, dilacak ke source dpkg dulu sebelum commit, dibatalkan sebelum sempat di-build/push).
+      Fix: `rewrite_path()` (ketat, dipakai buat *builder* dst.) vs `rewrite_path_loose()`
+      (dipakai cuma buat 10 syscall read-only/remove di atas).
+- [x] **BUG SERIUS — seluruh `$PREFIX` hilang, 2x kejadian:** setelah beberapa putaran
+      `dpkg --purge --force-all --force-remove-reinstreq libunbound` (buat keluar dari status
+      `reinstreq`/"very bad inconsistent state"), `$PREFIX/bin` lalu **seluruh `$PREFIX`** hilang
+      total (`ls -la $PREFIX` → "No such file or directory"). User clear-data + install ulang dari
+      nol (30 MB fresh) — **hilang lagi**, kali ini **tanpa** menjalankan perintah destruktif apa
+      pun, cuma `pkg update`/`pkg upgrade` yang gagal "not installed".
+- [x] **Root cause (kejadian ke-2, ditemukan lewat baca ulang `BootstrapInstaller.extract()`):**
+      race condition, bukan corruption dpkg. `extract()` selalu `if (prefix.exists())
+      prefix.deleteRecursively()` **sebelum** `staging.renameTo(prefix)` — kalau `install()`
+      terpanggil **dua kali bersamaan** (double-tap tombol "Unduh & pasang" sebelum Compose sempat
+      menyembunyikan tombolnya di frame berikutnya, ATAU install pertama masih jalan di background
+      IO thread walau composable-nya sudah dibuang — `withContext(Dispatchers.IO)` **tidak**
+      cooperative-cancel operasi file blocking), run kedua yang selesai belakangan akan
+      men-delete-recursively prefix yang **sudah jadi & sedang dipakai** run pertama (bash sudah
+      jalan dari situ!). Proses bash yang sudah ke-fork tetap hidup (binary-nya sudah di-map ke
+      memori), tapi setiap lookup path baru (`$PREFIX`, `$PREFIX/bin`, cari `pkg`/`apt` di `PATH`)
+      langsung ENOENT — persis gejala "abis install fresh kok prefix-nya kosong total".
+- [x] **Fix:** `BootstrapInstaller.install()` sekarang dijaga `Mutex.tryLock()` — run kedua yang
+      tumpang tindih langsung ditolak (`BootstrapState.Failed("Instalasi lain sedang berjalan...")`)
+      alih-alih ikut race ke `extract()`. Tambahan jaga-jaga di UI (`TerminalHost.kt`): `onClick`
+      tombol install sekarang cek ulang `state is Idle/Failed` sebelum `scope.launch`, biar
+      double-tap dalam satu frame yang sama tidak dua-duanya lolos ke `install()`.
+- [ ] **Belum diverifikasi di device** (fix race condition di atas). User perlu clear-data lagi,
+      install ulang (sekali, tanpa tap ulang), baru lanjut `apt install -y openjdk-17`.
 - [ ] Setelah `java -version` jalan: pasang **Gradle** (paket Termux `gradle` 9.6.1, butuh JDK 21
       sebagai dependency menurut build script-nya — cek ulang versi JDK yang dibutuhkan) →
       prasyarat Fase 3 (Gradle sync). Android SDK/build-tools aarch64 menyusul terpisah (Termux
