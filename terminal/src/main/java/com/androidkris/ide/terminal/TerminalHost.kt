@@ -54,7 +54,14 @@ fun TerminalHost(
 
     LaunchedEffect(Unit) {
         Environment.init(context)
-        mode = if (Environment.isInstalled) TerminalMode.Bash else TerminalMode.Setup
+        if (Environment.isInstalled) {
+            // Cheap + idempotent: keeps an already-installed prefix's apt.conf in sync with
+            // whatever this build of the app expects, without re-downloading the bootstrap.
+            Environment.writeAptConfig()
+            mode = TerminalMode.Bash
+        } else {
+            mode = TerminalMode.Setup
+        }
     }
 
     when (mode) {

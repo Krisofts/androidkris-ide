@@ -54,7 +54,7 @@ object BootstrapInstaller {
                 onProgress(BootstrapState.Extracting)
                 extract(zip)
                 zip.delete()
-                writeAptPrefixOverride()
+                Environment.writeAptConfig()
 
                 Environment.ensureRuntimeDirs()
                 onProgress(BootstrapState.Done)
@@ -152,36 +152,6 @@ object BootstrapInstaller {
         if (prefix.exists()) prefix.deleteRecursively()
         prefix.parentFile?.mkdirs()
         if (!staging.renameTo(prefix)) throw RuntimeException("Gagal memindah staging ke prefix")
-    }
-
-    /**
-     * `apt`/`dpkg` compile in `Dir::*` defaults pointing at Termux's own absolute prefix
-     * (unlike bash, they don't fall back to our env vars). apt.conf.d overrides are the
-     * standard way to relocate them — but apt only looks under its own compiled-in
-     * `Dir::Etc` for such files in the first place, so this one is only ever read because
-     * [Environment.shellEnv] points `APT_CONFIG` straight at it.
-     */
-    private fun writeAptPrefixOverride() {
-        val prefix = Environment.prefix.absolutePath
-        Environment.aptConfig.parentFile?.mkdirs()
-        Environment.aptConfig.writeText(
-            """
-            Dir "$prefix/";
-            Dir::Bin::Methods "$prefix/lib/apt/methods/";
-            Dir::Bin::dpkg "$prefix/bin/dpkg";
-            Dir::Etc "$prefix/etc/apt/";
-            Dir::State "$prefix/var/lib/apt/";
-            Dir::State::status "$prefix/var/lib/dpkg/status";
-            Dir::Cache "$prefix/var/cache/apt/";
-            Dir::Log "$prefix/var/log/apt/";
-
-            """.trimIndent()
-        )
-        File(Environment.prefix, "etc/dpkg").mkdirs()
-        File(Environment.prefix, "var/lib/dpkg").mkdirs()
-        File(Environment.prefix, "var/lib/apt/lists/partial").mkdirs()
-        File(Environment.prefix, "var/cache/apt/archives/partial").mkdirs()
-        File(Environment.prefix, "var/log/apt").mkdirs()
     }
 
     private fun cleanup() {
