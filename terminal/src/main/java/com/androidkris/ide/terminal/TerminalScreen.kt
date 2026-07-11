@@ -1,5 +1,6 @@
 package com.androidkris.ide.terminal
 
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Typeface
 import android.view.inputmethod.InputMethodManager
@@ -17,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.termux.terminal.TerminalSession
@@ -39,6 +41,7 @@ fun TerminalScreen(
 ) {
     // One-slot holder so the extra-keys row and onRelease can reach the session.
     val holder = remember { arrayOfNulls<TerminalSession>(1) }
+    val context = LocalContext.current
 
     Column(modifier = modifier.fillMaxSize()) {
         AndroidView(
@@ -71,6 +74,7 @@ fun TerminalScreen(
                 val session = TerminalSession(
                     shellPath, cwd, shellArgs, shellEnv, null,
                     TerminalSessionClientImpl(
+                        context = ctx,
                         onScreenUpdated = { view.onScreenUpdated() },
                         onFinished = { onSessionEnd() },
                     ),
@@ -91,6 +95,17 @@ fun TerminalScreen(
             onKey = { seq ->
                 holder[0]?.let { s -> val b = seq.toByteArray(); s.write(b, 0, b.size) }
             },
+            onPaste = {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val text = cm.primaryClip
+                    ?.takeIf { it.itemCount > 0 }
+                    ?.getItemAt(0)
+                    ?.coerceToText(context)
+                    ?.toString()
+                if (!text.isNullOrEmpty()) {
+                    holder[0]?.let { s -> val b = text.toByteArray(); s.write(b, 0, b.size) }
+                }
+            },
         )
     }
 }
@@ -102,7 +117,7 @@ private fun showKeyboard(ctx: Context, view: TerminalView) {
 }
 
 @Composable
-private fun ExtraKeysRow(onKey: (String) -> Unit) {
+private fun ExtraKeysRow(onKey: (String) -> Unit, onPaste: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -110,6 +125,12 @@ private fun ExtraKeysRow(onKey: (String) -> Unit) {
             .padding(horizontal = 6.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        FilledTonalButton(
+            onClick = onPaste,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+        ) {
+            Text("PASTE")
+        }
         ExtraKeys.forEach { (label, seq) ->
             FilledTonalButton(
                 onClick = { onKey(seq) },
