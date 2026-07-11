@@ -36,11 +36,6 @@ object BootstrapInstaller {
     private val SYMLINK_SEPARATOR = Char(0x2190) // '←' U+2190, Termux SYMLINKS.txt delimiter
     private const val MODE_0700 = 448            // "700".toInt(8)
 
-    // Termux's official bootstrap is built for its own app, so a handful of SYMLINKS.txt
-    // entries (apt/gpg keyrings, a few busybox-style aliases) and a couple of binaries (apt,
-    // dpkg) hardcode this absolute path at compile time instead of using a relative one.
-    private const val TERMUX_HARDCODED_PREFIX = "/data/data/com.termux/files/usr"
-
     suspend fun install(context: Context, onProgress: (BootstrapState) -> Unit) =
         withContext(Dispatchers.IO) {
             try {
@@ -54,7 +49,7 @@ object BootstrapInstaller {
                 onProgress(BootstrapState.Extracting)
                 extract(zip)
                 zip.delete()
-                Environment.writeAptConfig()
+                Environment.repairPrefix()
 
                 Environment.ensureRuntimeDirs()
                 onProgress(BootstrapState.Done)
@@ -123,8 +118,8 @@ object BootstrapInstaller {
                         newPath.parentFile?.mkdirs()
                         // A few entries point at Termux's own absolute prefix; retarget those
                         // at ours so the symlink isn't dangling once staging becomes `prefix`.
-                        val oldPath = if (parts[0].startsWith(TERMUX_HARDCODED_PREFIX)) {
-                            Environment.prefix.absolutePath + parts[0].removePrefix(TERMUX_HARDCODED_PREFIX)
+                        val oldPath = if (parts[0].startsWith(Environment.TERMUX_HARDCODED_PREFIX)) {
+                            Environment.prefix.absolutePath + parts[0].removePrefix(Environment.TERMUX_HARDCODED_PREFIX)
                         } else {
                             parts[0]
                         }

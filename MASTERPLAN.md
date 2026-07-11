@@ -159,11 +159,24 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
       resmi didukung apt) langsung ke path `apt.conf` kita di `Environment.shellEnv()` — bypass
       masalah chicken-and-egg tanpa perlu bootstrap di-download ulang. Ganti `-bash` (login shell)
       → `bash` biasa di `TerminalHost.kt` supaya nggak coba baca `/etc/profile` Termux sama sekali.
-- [ ] **Belum diverifikasi ulang di device** — kali ini cukup update app (APK baru), *tidak*
-      perlu reinstall bootstrap (file `apt.conf` sudah ada dari instalasi sebelumnya). Coba lagi:
-      `apt update && apt install -y openjdk-17` → kalau masih gagal, titik rawan berikutnya
-      kemungkinan verifikasi signature GPG (`gpgv`) terhadap `Release` file pakai keyring yang
-      di-retarget.
+- [x] **Diuji di device (putaran 2):** `APT_CONFIG` fix jalan — apt beneran fetch `InRelease`
+      (14.0 kB) dari `packages-cf.termux.dev`. Gagal berikutnya: `Couldn't execute
+      /data/data/com.termux/files/usr/bin/apt-key` → repo dianggap "not signed", di-disable.
+- [x] **Ditemukan:** bukan cuma `Dir::*` config — **~110 file di bootstrap adalah shell script**
+      (`apt-key`, `termux-*`, `dpkg-buildapi`, dll) dengan **shebang** `#!/data/data/com.termux/
+      files/usr/bin/sh` hardcoded (bukan cuma di baris shebang, tapi juga isinya — mis. `apt-key`
+      nyimpen path `trusted.gpg.d` hardcoded juga). Interpreter-nya nggak ada di sandbox kita
+      (`EACCES`, punya app lain), jadi script-nya nggak bisa dieksekusi sama sekali.
+- [x] **Fix (putaran 2):** `Environment.repairPrefix()` — sekarang jalan tiap terminal dibuka
+      (bukan cuma sekali pas install): (1) tulis ulang `apt.conf` (+ `Dir::Bin::apt-key` yang
+      kelewat sebelumnya), (2) `fixHardcodedScriptShebangs()` — scan seluruh prefix, untuk file
+      yang diawali `#!` ganti semua kemunculan path Termux ke prefix kita (bukan cuma baris
+      shebang). Refactor ini juga bikin iterasi berikutnya nggak butuh reinstall bootstrap sama
+      sekali — cukup update APK.
+- [ ] **Belum diverifikasi ulang di device** — `fixHardcodedScriptShebangs()` jalan di prefix
+      yang sudah ter-extract sebelumnya juga (bukan cuma pas install baru), jadi cukup update
+      APK, **tidak perlu** reinstall bootstrap. Coba lagi: `apt update && apt install -y
+      openjdk-17` → titik rawan berikutnya kemungkinan `gpgv`/keyring trust masih ada gap.
 - [ ] Setelah `java -version` jalan: pasang **Gradle** (paket Termux `gradle` 9.6.1, butuh JDK 21
       sebagai dependency menurut build script-nya — cek ulang versi JDK yang dibutuhkan) →
       prasyarat Fase 3 (Gradle sync). Android SDK/build-tools aarch64 menyusul terpisah (Termux

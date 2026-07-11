@@ -13,6 +13,11 @@ import java.io.File
  */
 object Environment {
 
+    // Termux's official bootstrap is built for its own app, so a good chunk of it (SYMLINKS.txt
+    // entries, apt/dpkg's compiled-in Dir::* defaults, ~110 script shebangs) hardcodes this
+    // absolute path at compile/package time instead of a relocatable one.
+    const val TERMUX_HARDCODED_PREFIX = "/data/data/com.termux/files/usr"
+
     lateinit var root: File
         private set
     lateinit var prefix: File
@@ -54,12 +59,43 @@ object Environment {
     }
 
     /**
-     * (Re)writes the apt.conf.d override that retargets apt/dpkg's compiled-in `Dir::*`
-     * defaults (Termux's own absolute prefix) at ours. Cheap and idempotent — called on every
-     * bootstrap install *and* every terminal launch, so a code change here reaches an already
-     * -installed prefix without needing to re-download the 30MB bootstrap zip.
+     * Fixes up everything in an already-extracted prefix that still points at Termux's own
+     * absolute prefix instead of ours (apt.conf + script shebangs/bodies). Idempotent and cheap
+     * enough to run on every terminal launch — called from both [BootstrapInstaller] right
+     * after a fresh extract and from [TerminalHost] before every session, so a fix here reaches
+     * an already-installed prefix without re-downloading the 30MB bootstrap zip.
      */
-    fun writeAptConfig() {
+    fun repairPrefix() {
+        writeAptConfig()
+        fixHardcodedScriptShebangs()
+    }
+
+    /**
+     * ~110 files in the bootstrap are shell scripts (apt-key, termux-*, dpkg-buildapi, ...)
+     * whose shebang — and sometimes body, e.g. apt-key's trusted.gpg path — is hardcoded to
+     * Termux's own absolute prefix. The interpreter path doesn't exist in our sandbox (EACCES,
+     * another app's data dir), so the script can't even be exec'd. Unlike compiled binaries
+     * (fixed-width embedded strings, can't safely patch), scripts are plain text: peek the
+     * first 2 bytes to skip binaries cheaply, then rewrite every occurrence in true scripts.
+     */
+    private fun fixHardcodedScriptShebangs() {
+        prefix.walkTopDown().forEach { file ->
+            if (!file.isFile) return@forEach
+            val head = runCatching {
+                file.inputStream().use { val b = ByteArray(2); if (it.read(b) == 2) b else null }
+            }.getOrNull() ?: return@forEach
+            if (head[0] != '#'.code.toByte() || head[1] != '!'.code.toByte()) return@forEach
+            val text = runCatching { file.readText(Charsets.UTF_8) }.getOrNull() ?: return@forEach
+            if (!text.contains(TERMUX_HARDCODED_PREFIX)) return@forEach
+            file.writeText(text.replace(TERMUX_HARDCODED_PREFIX, prefix.absolutePath), Charsets.UTF_8)
+        }
+    }
+
+    /**
+     * (Re)writes the apt.conf.d override that retargets apt/dpkg's compiled-in `Dir::*`
+     * defaults (Termux's own absolute prefix) at ours.
+     */
+    private fun writeAptConfig() {
         val p = prefix.absolutePath
         aptConfig.parentFile?.mkdirs()
         aptConfig.writeText(
@@ -67,6 +103,7 @@ object Environment {
             Dir "$p/";
             Dir::Bin::Methods "$p/lib/apt/methods/";
             Dir::Bin::dpkg "$p/bin/dpkg";
+            Dir::Bin::apt-key "$p/bin/apt-key";
             Dir::Etc "$p/etc/apt/";
             Dir::State "$p/var/lib/apt/";
             Dir::State::status "$p/var/lib/dpkg/status";
