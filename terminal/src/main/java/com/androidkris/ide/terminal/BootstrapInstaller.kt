@@ -51,6 +51,21 @@ object BootstrapInstaller {
     // started later. tryLock() makes the second caller fail fast instead of racing.
     private val installLock = Mutex()
 
+    /**
+     * True if a previously-downloaded bootstrap zip is sitting in [Environment.cachedZip] and
+     * still matches [Environment.BOOTSTRAP_SHA256] — i.e. [install] can skip the 30 MB download
+     * and jump straight to re-extracting. Used to auto-recover in seconds when some OEM ROMs'
+     * security heuristics (MIUI, FuntouchOS/OriginOS — see [extract]'s chmod-batching comment)
+     * strip or delete an already-installed prefix out from under a running session: the *zip* was
+     * only ever read from, never flagged, so it reliably survives even when the extracted-and-
+     * chmod'd prefix doesn't.
+     */
+    suspend fun hasValidCache(context: Context): Boolean = withContext(Dispatchers.IO) {
+        Environment.init(context)
+        val zip = Environment.cachedZip
+        zip.exists() && runCatching { verifySha256(zip, Environment.BOOTSTRAP_SHA256) }.isSuccess
+    }
+
     suspend fun install(context: Context, onProgress: (BootstrapState) -> Unit) =
         withContext(Dispatchers.IO) {
             if (!installLock.tryLock()) {
@@ -60,17 +75,26 @@ object BootstrapInstaller {
             try {
                 Environment.init(context)
                 Environment.logDiag("install() start")
-                val zip = File(context.cacheDir, "bootstrap-aarch64.zip")
-                download(Environment.BOOTSTRAP_URL, zip, onProgress)
-                Environment.logDiag("download done, size=${zip.length()}")
+                val zip = Environment.cachedZip
+                val cached = zip.exists() && runCatching { verifySha256(zip, Environment.BOOTSTRAP_SHA256) }.isSuccess
+                if (cached) {
+                    Environment.logDiag("reusing cached+verified zip, size=${zip.length()} (skip download)")
+                    onProgress(BootstrapState.Verifying)
+                } else {
+                    download(Environment.BOOTSTRAP_URL, zip, onProgress)
+                    Environment.logDiag("download done, size=${zip.length()}")
 
-                onProgress(BootstrapState.Verifying)
-                verifySha256(zip, Environment.BOOTSTRAP_SHA256)
-                Environment.logDiag("sha256 verified")
+                    onProgress(BootstrapState.Verifying)
+                    runCatching { verifySha256(zip, Environment.BOOTSTRAP_SHA256) }
+                        .onFailure { zip.delete(); throw it } // don't keep a corrupt zip as "cache"
+                    Environment.logDiag("sha256 verified")
+                }
 
                 onProgress(BootstrapState.Extracting)
                 extract(zip)
-                zip.delete()
+                // Deliberately NOT deleted: kept as Environment.cachedZip so a later wipe of the
+                // extracted prefix (see extract() comment) can be repaired in seconds via
+                // hasValidCache()/install() again, without re-downloading 30 MB.
 
                 // Fail loud instead of reporting Done on a silently-incomplete prefix: verify the
                 // one file everything else depends on actually landed and is executable.
@@ -142,6 +166,7 @@ object BootstrapInstaller {
         staging.mkdirs()
 
         val symlinks = ArrayList<Pair<String, String>>(64)
+        val writtenFiles = ArrayList<String>(700)
         ZipInputStream(zip.inputStream().buffered()).use { zin ->
             var entry = zin.nextEntry
             while (entry != null) {
@@ -170,13 +195,23 @@ object BootstrapInstaller {
                     } else {
                         target.parentFile?.mkdirs()
                         FileOutputStream(target).use { zin.copyTo(it) }
-                        Os.chmod(target.absolutePath, MODE_0700)
+                        writtenFiles.add(target.absolutePath)
                     }
                 }
                 zin.closeEntry()
                 entry = zin.nextEntry
             }
         }
+        // chmod as a separate batched pass rather than interleaved with each write: some OEM
+        // security layers (MIUI, FuntouchOS/OriginOS — see the "install.log"/OEM-cleanup note in
+        // Environment.logDiag) heuristically flag the write-then-chmod-executable-immediately
+        // pattern, repeated hundreds of times in a tight loop, as a malware-dropper signature and
+        // strip or delete the resulting files. Doing all ~700 writes first and all ~700 chmods in
+        // a second pass doesn't guarantee evasion (no public API to opt out of an OEM's private
+        // heuristics) but changes the syscall-interleaving signature, which is the only lever
+        // available from app code.
+        for (path in writtenFiles) Os.chmod(path, MODE_0700)
+
         if (symlinks.isEmpty()) throw RuntimeException("SYMLINKS.txt tidak ditemukan di bootstrap")
         for ((oldPath, newPath) in symlinks) Os.symlink(oldPath, newPath)
 

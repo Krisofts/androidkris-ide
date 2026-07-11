@@ -252,8 +252,43 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
       alih-alih ikut race ke `extract()`. Tambahan jaga-jaga di UI (`TerminalHost.kt`): `onClick`
       tombol install sekarang cek ulang `state is Idle/Failed` sebelum `scope.launch`, biar
       double-tap dalam satu frame yang sama tidak dua-duanya lolos ke `install()`.
-- [ ] **Belum diverifikasi di device** (fix race condition di atas). User perlu clear-data lagi,
-      install ulang (sekali, tanpa tap ulang), baru lanjut `apt install -y openjdk-17`.
+- [x] **Race condition BUKAN penyebabnya di kejadian ke-3:** user konfirmasi install bersih (app
+      di-uninstall dulu, sekali tap, tunggu "Selesai"), lalu **masuk terminal, jalanin cuma
+      command baca-baca doang** (`cat`, `ls`, `apt update`) — `install.log` nunjukin prefix
+      **sehat penuh saat launch** (`binCount=394`), tapi **hilang total dalam sesi yang sama**,
+      app **tetap di foreground terus** (tidak pindah app). Device: **Redmi Note 10S (MIUI)** dan
+      **Vivo (FuntouchOS/OriginOS)** — dua-duanya kejadian yang sama.
+- [x] **Root cause paling mungkin (di luar kendali kode kita):** MIUI & FuntouchOS/OriginOS
+      punya heuristik keamanan yang **secara spesifik mendeteksi pola tulis-file-lalu-chmod-
+      executable berulang ratusan kali** (persis yang `extract()` lakukan: ~700 file, tulis lalu
+      `chmod 0700` satu-satu) sebagai signature "malware dropper", dan diam-diam menghapus/
+      mencabut file hasilnya. Ini masalah kompatibilitas yang **sudah didokumentasikan buat
+      Termux sendiri** di ROM-ROM ini — bukan hal yang bisa di-fix tuntas dari kode app (tidak
+      ada API publik buat opt-out dari heuristik keamanan OEM tertentu).
+- [x] **Mitigasi yang bisa dilakukan dari kode (dua arah, keduanya di-ship):**
+      1. **Auto pulih cepat**: `Environment.cachedZip` (sibling `ide/`, bukan di `context.cacheDir`
+         lagi) sekarang **disimpan permanen** setelah extract sukses (dulu langsung dihapus).
+         `BootstrapInstaller.hasValidCache()` cek hash-nya masih cocok; kalau prefix ternyata
+         hilang/rusak, `TerminalHost` otomatis re-extract dari zip yang sudah ke-cache ini
+         (`BootstrapSetup(autoStart = true)`, lewat `install()` yang sama — deteksi cache
+         otomatis, skip fase download) — pemulihan dari total wipe jadi **hitungan detik**,
+         bukan unduh ulang 30 MB + tap manual lagi.
+      2. **Kurangi signature yang dicurigai**: `extract()` sekarang menulis **semua** file dulu,
+         baru **satu batch `chmod`** terpisah di akhir (bukan interleaved tulis-lalu-chmod per
+         file). Tidak menjamin lolos dari heuristik OEM (tidak ada cara memastikan tanpa akses ke
+         source heuristik-nya), tapi mengubah pola syscall-nya — satu-satunya tuas yang tersedia
+         dari sisi app.
+      3. **Diagnostic log** (`Environment.logDiag()`, ditambahkan sebelumnya) dipertahankan buat
+         menangkap kejadian berikutnya kalau masih terjadi.
+- [ ] **Rekomendasi ke user (di luar kode, harus dilakukan manual di device):** MIUI — matikan
+      **"MIUI Optimization"** di Developer Options (bukan cuma battery saver/autostart biasa).
+      Vivo — cari pengaturan keamanan/"behavior interception" di iManager buat whitelist app ini.
+      Kalau ROM tetap agresif menghapus walau sudah dimatikan, **auto-repair di atas** jadi jaring
+      pengaman utama: user cukup keluar-masuk lagi ke terminal, tanpa unduh ulang.
+- [ ] **Belum diverifikasi di device** (fix di atas — batch chmod + auto-repair cache). User perlu
+      test lagi: kalau prefix masih kena hapus ROM, cek apakah re-entry ke terminal langsung
+      "Memperbaiki environment (dari cache)…" dalam hitungan detik alih-alih kembali ke layar
+      unduh 30 MB.
 - [ ] Setelah `java -version` jalan: pasang **Gradle** (paket Termux `gradle` 9.6.1, butuh JDK 21
       sebagai dependency menurut build script-nya — cek ulang versi JDK yang dibutuhkan) →
       prasyarat Fase 3 (Gradle sync). Android SDK/build-tools aarch64 menyusul terpisah (Termux

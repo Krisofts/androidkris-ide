@@ -51,6 +51,11 @@ fun TerminalHost(
 ) {
     val context = LocalContext.current
     var mode by remember { mutableStateOf(TerminalMode.Loading) }
+    // Set when the prefix is missing/broken but a previously-downloaded, still-valid bootstrap
+    // zip is cached (see Environment.cachedZip) — lets BootstrapSetup silently re-extract in
+    // seconds instead of showing the "unduh 30 MB" screen, for the case where something outside
+    // our control (see extract()'s OEM-cleanup comment) wiped an already-working prefix.
+    var autoRepair by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         Environment.init(context)
@@ -62,7 +67,9 @@ fun TerminalHost(
             Environment.repairPrefix()
             mode = TerminalMode.Bash
         } else {
-            Environment.logDiag("TerminalHost launch: isInstalled=false bashExists=${Environment.bash.exists()}")
+            val cached = BootstrapInstaller.hasValidCache(context)
+            Environment.logDiag("TerminalHost launch: isInstalled=false bashExists=${Environment.bash.exists()} validCache=$cached")
+            autoRepair = cached
             mode = TerminalMode.Setup
         }
     }
@@ -74,6 +81,7 @@ fun TerminalHost(
 
         TerminalMode.Setup -> BootstrapSetup(
             modifier = modifier,
+            autoStart = autoRepair,
             onInstalled = { mode = TerminalMode.Bash },
             onUseSystemShell = { mode = TerminalMode.System },
         )
@@ -101,15 +109,28 @@ fun TerminalHost(
 @Composable
 private fun BootstrapSetup(
     modifier: Modifier,
+    autoStart: Boolean,
     onInstalled: () -> Unit,
     onUseSystemShell: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<BootstrapState>(BootstrapState.Idle) }
+    var autoTriggered by remember { mutableStateOf(false) }
 
     LaunchedEffect(state) {
         if (state is BootstrapState.Done) onInstalled()
+    }
+
+    // Fires once per composition if a valid cached zip was found. Left ungated on failure (falls
+    // through to the normal Idle/Failed branch below with the manual button + system-shell
+    // fallback still available) so a broken auto-repair never strands the user with no options.
+    LaunchedEffect(autoStart) {
+        if (autoStart && !autoTriggered) {
+            autoTriggered = true
+            state = BootstrapState.Verifying
+            BootstrapInstaller.install(context) { st -> state = st }
+        }
     }
 
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -181,8 +202,12 @@ private fun BootstrapSetup(
                     )
                 }
 
-                is BootstrapState.Verifying -> ProgressLabel("Memverifikasi…")
-                is BootstrapState.Extracting -> ProgressLabel("Mengekstrak…")
+                is BootstrapState.Verifying -> ProgressLabel(
+                    if (autoStart) "Memperbaiki environment (dari cache)…" else "Memverifikasi…"
+                )
+                is BootstrapState.Extracting -> ProgressLabel(
+                    if (autoStart) "Memperbaiki environment (dari cache)…" else "Mengekstrak…"
+                )
                 is BootstrapState.Done -> ProgressLabel("Selesai")
             }
         }

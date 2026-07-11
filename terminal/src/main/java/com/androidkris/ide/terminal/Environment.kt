@@ -38,6 +38,8 @@ object Environment {
         private set
     lateinit var interposeLib: File
         private set
+    lateinit var cachedZip: File
+        private set
 
     fun init(context: Context) {
         root = File(context.filesDir, "ide")
@@ -50,6 +52,11 @@ object Environment {
         aptConfig = File(prefix, "etc/apt/apt.conf.d/00androidkris-prefix.conf")
         caCertFile = File(prefix, "etc/tls/cert.pem")
         interposeLib = File(context.applicationInfo.nativeLibraryDir, "libinterpose.so")
+        // A sibling of `ide/`, not inside it: kept around after a successful install (unlike the
+        // old cacheDir-based temp file, which was deleted once extracted) so a wiped-out prefix
+        // (see BootstrapInstaller.hasValidCache()) can be re-extracted in seconds without
+        // re-downloading 30 MB, and survives even a total wipe of `prefix` itself.
+        cachedZip = File(root.parentFile, "bootstrap-aarch64.zip")
     }
 
     /** True once the bootstrap is extracted and bash is executable. */
