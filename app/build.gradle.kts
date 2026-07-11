@@ -56,6 +56,18 @@ android {
         }
     }
 
+    packaging {
+        jniLibs {
+            // AGP's default (uncompressed, load-directly-from-the-APK-zip) packaging leaves no
+            // standalone .so file on disk — fine for JNI's System.loadLibrary (Android's linker
+            // has a special zip-embedded-library path for that), but LD_PRELOAD is read by the
+            // dynamic linker before any of that Android-specific machinery, via plain open()/
+            // mmap() on the given path. It needs a real extracted file, so force legacy
+            // (extractNativeLibs=true-equivalent) packaging.
+            useLegacyPackaging = true
+        }
+    }
+
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
