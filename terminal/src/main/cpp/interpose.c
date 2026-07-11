@@ -154,3 +154,94 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
     free(rewritten);
     return r;
 }
+
+// dpkg mutates its admin/state files (status/status-old/status-new rotation) and unpacks
+// package contents (creating directories, files, symlinks, hardlinks, permissions) — all of
+// which touch paths under the prefix it thinks it's rooted at. Every mutating path-taking
+// call it might reasonably make needs the same redirect as the read-only ones above.
+
+typedef int (*unlink_fn)(const char *);
+int unlink(const char *path) {
+    static unlink_fn real = NULL;
+    if (real == NULL) real = (unlink_fn)dlsym(RTLD_NEXT, "unlink");
+    char *rewritten = rewrite_path(path);
+    int r = real(rewritten != NULL ? rewritten : path);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*rmdir_fn)(const char *);
+int rmdir(const char *path) {
+    static rmdir_fn real = NULL;
+    if (real == NULL) real = (rmdir_fn)dlsym(RTLD_NEXT, "rmdir");
+    char *rewritten = rewrite_path(path);
+    int r = real(rewritten != NULL ? rewritten : path);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*mkdir_fn)(const char *, mode_t);
+int mkdir(const char *path, mode_t mode) {
+    static mkdir_fn real = NULL;
+    if (real == NULL) real = (mkdir_fn)dlsym(RTLD_NEXT, "mkdir");
+    char *rewritten = rewrite_path(path);
+    int r = real(rewritten != NULL ? rewritten : path, mode);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*chmod_fn)(const char *, mode_t);
+int chmod(const char *path, mode_t mode) {
+    static chmod_fn real = NULL;
+    if (real == NULL) real = (chmod_fn)dlsym(RTLD_NEXT, "chmod");
+    char *rewritten = rewrite_path(path);
+    int r = real(rewritten != NULL ? rewritten : path, mode);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*rename_fn)(const char *, const char *);
+int rename(const char *oldpath, const char *newpath) {
+    static rename_fn real = NULL;
+    if (real == NULL) real = (rename_fn)dlsym(RTLD_NEXT, "rename");
+    char *old_r = rewrite_path(oldpath);
+    char *new_r = rewrite_path(newpath);
+    int r = real(old_r != NULL ? old_r : oldpath, new_r != NULL ? new_r : newpath);
+    free(old_r);
+    free(new_r);
+    return r;
+}
+
+typedef int (*link_fn)(const char *, const char *);
+int link(const char *oldpath, const char *newpath) {
+    static link_fn real = NULL;
+    if (real == NULL) real = (link_fn)dlsym(RTLD_NEXT, "link");
+    char *old_r = rewrite_path(oldpath);
+    char *new_r = rewrite_path(newpath);
+    int r = real(old_r != NULL ? old_r : oldpath, new_r != NULL ? new_r : newpath);
+    free(old_r);
+    free(new_r);
+    return r;
+}
+
+typedef int (*symlink_fn)(const char *, const char *);
+int symlink(const char *target, const char *linkpath) {
+    static symlink_fn real = NULL;
+    if (real == NULL) real = (symlink_fn)dlsym(RTLD_NEXT, "symlink");
+    // Only linkpath (where the link gets created) needs redirecting into our sandbox; target
+    // is the link's stored text and should stay whatever the caller intended.
+    char *rewritten = rewrite_path(linkpath);
+    int r = real(target, rewritten != NULL ? rewritten : linkpath);
+    free(rewritten);
+    return r;
+}
+
+typedef ssize_t (*readlink_fn)(const char *, char *, size_t);
+ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
+    static readlink_fn real = NULL;
+    if (real == NULL) real = (readlink_fn)dlsym(RTLD_NEXT, "readlink");
+    char *rewritten = rewrite_path(path);
+    ssize_t r = real(rewritten != NULL ? rewritten : path, buf, bufsiz);
+    free(rewritten);
+    return r;
+}
