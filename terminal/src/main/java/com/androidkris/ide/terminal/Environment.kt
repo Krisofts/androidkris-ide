@@ -46,6 +46,8 @@ object Environment {
         private set
     lateinit var gradleCachedZip: File
         private set
+    lateinit var javaHome: File
+        private set
 
     fun init(context: Context) {
         root = File(context.filesDir, "ide")
@@ -70,6 +72,10 @@ object Environment {
         gradleHome = File(root, "gradle")
         gradleBin = File(gradleHome, "bin/gradle")
         gradleCachedZip = File(root.parentFile, "gradle-bin.zip")
+        // Confirmed against AndroidIDE's own idesetup.sh (which installs the identical Termux
+        // `openjdk-*` package we do via apt): it sets JAVA_HOME to "$PREFIX/opt/openjdk" after
+        // install, not a version-specific subdirectory.
+        javaHome = File(prefix, "opt/openjdk")
     }
 
     /** True once the bootstrap is extracted and bash is executable. */
@@ -178,9 +184,6 @@ object Environment {
 
     /** Environment for a login shell inside the prefix. */
     fun shellEnv(): Array<String> {
-        // Gradle's own launcher script locates `java`/`javac` via PATH if $JAVA_HOME isn't set,
-        // so putting gradleHome/bin ahead of $PREFIX/bin (which apt-installed openjdk-* symlinks
-        // into) is enough — no need to guess openjdk's exact install path for JAVA_HOME.
         val pathPrefix = if (isGradleInstalled) "${gradleBin.parentFile!!.absolutePath}:" else ""
         val env = mutableListOf(
             "PREFIX=${prefix.absolutePath}",
@@ -202,6 +205,10 @@ object Environment {
             // real cert.pem the bootstrap already ships.
             "SSL_CERT_FILE=${caCertFile.absolutePath}",
         )
+        // Only set once openjdk-* is actually installed there; Gradle's launcher script falls
+        // back to locating `java` via PATH on its own when $JAVA_HOME is unset, so an absent JDK
+        // degrades to "Gradle can't find a JDK yet" rather than a bogus JAVA_HOME pointing nowhere.
+        if (javaHome.exists()) env += "JAVA_HOME=${javaHome.absolutePath}"
         // Some hardcoded Termux-prefix paths (e.g. dpkg's own config directory) have no
         // config-file or env-var override at all — Android also flatly denies traversing
         // another app's data dir (EACCES on the whole subtree), so there's nothing to create

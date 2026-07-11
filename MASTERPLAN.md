@@ -312,6 +312,11 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
       launcher script → risiko OEM-cleanup yang sama seperti bootstrap.
 - [x] **Refactor kecil:** logic download+verifySha256 yang tadinya duplikat di `BootstrapInstaller`
       diekstrak ke `Downloader.kt` (dipakai bareng oleh `BootstrapInstaller` & `GradleInstaller`).
+- [x] **`JAVA_HOME` sekarang diset eksplisit.** User share `idesetup.sh` AndroidIDE langsung —
+      konfirmasi paket `openjdk-*` Termux (yang sama persis kita pakai lewat `apt install`) selalu
+      terpasang di `$PREFIX/opt/openjdk`, bukan path per-versi. Sebelumnya sengaja tidak di-set
+      (nggak yakin path-nya, andalkan Gradle nyari `java` sendiri lewat `PATH`) — sekarang
+      `Environment.javaHome` + `shellEnv()` set `JAVA_HOME` kalau direktorinya sudah ada.
 - [ ] **JDK:** tetap lewat `apt install -y openjdk-17` (jalur yang sudah jauh lebih matang — semua
       bug dpkg/apt yang pernah ditemukan sudah di-fix termasuk `.dpkg-tmp`). Blocker yang tersisa
       murni OEM-level (MIUI/Vivo), bukan apt/dpkg lagi — lihat mitigasi cache+auto-repair +
