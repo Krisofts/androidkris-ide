@@ -350,3 +350,103 @@ int utimes(const char *path, const struct timeval times[2]) {
     free(rewritten);
     return r;
 }
+
+// dpkg spawns external helper commands (`rm` for cleanup, possibly `tar`/`find` elsewhere) as
+// separate processes rather than calling libc directly — they inherit LD_PRELOAD same as any
+// child process, but modern coreutils implements most of these via the *at() syscall family
+// (unlinkat, fstatat, ...) instead of the older non-at() ones, which need their own
+// interposition since dirfd-relative resolution is a different code path entirely. As with
+// openat(), only rewrite when dirfd is AT_FDCWD or the path is already absolute — otherwise
+// our tracked cwd isn't what the path is actually relative to.
+
+typedef int (*unlinkat_fn)(int, const char *, int);
+int unlinkat(int dirfd, const char *pathname, int flags) {
+    static unlinkat_fn real = NULL;
+    if (real == NULL) real = (unlinkat_fn)dlsym(RTLD_NEXT, "unlinkat");
+    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path(pathname) : NULL;
+    int r = real(dirfd, rewritten != NULL ? rewritten : pathname, flags);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*renameat_fn)(int, const char *, int, const char *);
+int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath) {
+    static renameat_fn real = NULL;
+    if (real == NULL) real = (renameat_fn)dlsym(RTLD_NEXT, "renameat");
+    char *old_r = (olddirfd == AT_FDCWD || oldpath[0] == '/') ? rewrite_path(oldpath) : NULL;
+    char *new_r = (newdirfd == AT_FDCWD || newpath[0] == '/') ? rewrite_path(newpath) : NULL;
+    int r = real(olddirfd, old_r != NULL ? old_r : oldpath, newdirfd, new_r != NULL ? new_r : newpath);
+    free(old_r);
+    free(new_r);
+    return r;
+}
+
+typedef int (*mkdirat_fn)(int, const char *, mode_t);
+int mkdirat(int dirfd, const char *pathname, mode_t mode) {
+    static mkdirat_fn real = NULL;
+    if (real == NULL) real = (mkdirat_fn)dlsym(RTLD_NEXT, "mkdirat");
+    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path(pathname) : NULL;
+    int r = real(dirfd, rewritten != NULL ? rewritten : pathname, mode);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*fchmodat_fn)(int, const char *, mode_t, int);
+int fchmodat(int dirfd, const char *pathname, mode_t mode, int flags) {
+    static fchmodat_fn real = NULL;
+    if (real == NULL) real = (fchmodat_fn)dlsym(RTLD_NEXT, "fchmodat");
+    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path(pathname) : NULL;
+    int r = real(dirfd, rewritten != NULL ? rewritten : pathname, mode, flags);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*symlinkat_fn)(const char *, int, const char *);
+int symlinkat(const char *target, int newdirfd, const char *linkpath) {
+    static symlinkat_fn real = NULL;
+    if (real == NULL) real = (symlinkat_fn)dlsym(RTLD_NEXT, "symlinkat");
+    char *rewritten = (newdirfd == AT_FDCWD || linkpath[0] == '/') ? rewrite_path(linkpath) : NULL;
+    int r = real(target, newdirfd, rewritten != NULL ? rewritten : linkpath);
+    free(rewritten);
+    return r;
+}
+
+typedef ssize_t (*readlinkat_fn)(int, const char *, char *, size_t);
+ssize_t readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
+    static readlinkat_fn real = NULL;
+    if (real == NULL) real = (readlinkat_fn)dlsym(RTLD_NEXT, "readlinkat");
+    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path(pathname) : NULL;
+    ssize_t r = real(dirfd, rewritten != NULL ? rewritten : pathname, buf, bufsiz);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*fchownat_fn)(int, const char *, uid_t, gid_t, int);
+int fchownat(int dirfd, const char *pathname, uid_t owner, gid_t group, int flags) {
+    static fchownat_fn real = NULL;
+    if (real == NULL) real = (fchownat_fn)dlsym(RTLD_NEXT, "fchownat");
+    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path(pathname) : NULL;
+    int r = real(dirfd, rewritten != NULL ? rewritten : pathname, owner, group, flags);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*faccessat_fn)(int, const char *, int, int);
+int faccessat(int dirfd, const char *pathname, int mode, int flags) {
+    static faccessat_fn real = NULL;
+    if (real == NULL) real = (faccessat_fn)dlsym(RTLD_NEXT, "faccessat");
+    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path(pathname) : NULL;
+    int r = real(dirfd, rewritten != NULL ? rewritten : pathname, mode, flags);
+    free(rewritten);
+    return r;
+}
+
+typedef int (*fstatat_fn)(int, const char *, struct stat *, int);
+int fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
+    static fstatat_fn real = NULL;
+    if (real == NULL) real = (fstatat_fn)dlsym(RTLD_NEXT, "fstatat");
+    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path(pathname) : NULL;
+    int r = real(dirfd, rewritten != NULL ? rewritten : pathname, buf, flags);
+    free(rewritten);
+    return r;
+}
