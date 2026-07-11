@@ -98,6 +98,24 @@ DIR *opendir(const char *name) {
     return d;
 }
 
+// dpkg's own config-directory scan calls scandir() directly (confirmed from its source),
+// not opendir() — and bionic's scandir() doesn't necessarily resolve its internal directory
+// access through the *public* opendir symbol our interposition above relies on, so it needs
+// its own explicit override.
+typedef int (*scandir_fn)(const char *, struct dirent ***,
+                           int (*)(const struct dirent *),
+                           int (*)(const struct dirent **, const struct dirent **));
+int scandir(const char *dirp, struct dirent ***namelist,
+            int (*filter)(const struct dirent *),
+            int (*compar)(const struct dirent **, const struct dirent **)) {
+    static scandir_fn real = NULL;
+    if (real == NULL) real = (scandir_fn)dlsym(RTLD_NEXT, "scandir");
+    char *rewritten = rewrite_path(dirp);
+    int r = real(rewritten != NULL ? rewritten : dirp, namelist, filter, compar);
+    free(rewritten);
+    return r;
+}
+
 typedef int (*stat_fn)(const char *, struct stat *);
 int stat(const char *path, struct stat *buf) {
     static stat_fn real = NULL;
