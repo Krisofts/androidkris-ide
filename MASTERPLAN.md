@@ -173,10 +173,33 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
       yang diawali `#!` ganti semua kemunculan path Termux ke prefix kita (bukan cuma baris
       shebang). Refactor ini juga bikin iterasi berikutnya nggak butuh reinstall bootstrap sama
       sekali — cukup update APK.
-- [ ] **Belum diverifikasi ulang di device** — `fixHardcodedScriptShebangs()` jalan di prefix
-      yang sudah ter-extract sebelumnya juga (bukan cuma pas install baru), jadi cukup update
-      APK, **tidak perlu** reinstall bootstrap. Coba lagi: `apt update && apt install -y
-      openjdk-17` → titik rawan berikutnya kemungkinan `gpgv`/keyring trust masih ada gap.
+- [x] **Diuji di device (putaran 3):** jauh lebih jauh — `apt update` sukses penuh (GPG/keyring
+      verifikasi lolos!), `apt install -y openjdk-17` **berhasil fetch 118 MB** paket (openjdk-17
+      95.6 MB + puluhan dependency X11/font/audio). Gagal di tahap akhir (unpack): `dpkg: error:
+      error opening configuration directory '/data/data/com.termux/files/usr/etc/dpkg/dpkg.cfg.d':
+      Permission denied`.
+- [x] **Ditemukan (beda kategori dari 4 fix sebelumnya):** dicek langsung ke source resmi dpkg
+      (`dpkg_options_load_dir()`) — path config dpkg (`CONFIGDIR`) itu **konstanta compile-time
+      yang genuinely terpisah** dari `--root`/`--instdir`/`--admindir`/`DPKG_ROOT`, **tidak ada**
+      env var atau flag CLI buat override. Dan karena target-nya path app Termux, Android **OS-level**
+      menolak traversal ke situ (`EACCES` di seluruh subtree, bukan sekadar "belum ada") — nggak
+      ada trik filesystem userspace yang bisa nembus ini.
+- [x] **Fix (putaran 3) — lompatan scope, disetujui user:** native **LD_PRELOAD shim**
+      (`terminal/src/main/cpp/interpose.c`, dibangun via CMake/NDK, `ndkVersion = 26.1.10909125`).
+      Intercept `open`/`openat`/`fopen`/`opendir`/`stat`/`lstat`/`access`/`execve` di level libc;
+      kalau path diawali prefix Termux, alihkan ke prefix kita (dibaca dari env var
+      `ANDROIDKRIS_REAL_PREFIX`, bukan hardcoded, biar tetap sinkron sama `Environment.prefix`
+      tanpa rebuild native). Diaktifkan via `LD_PRELOAD` di `shellEnv()` — **hanya kalau file
+      `.so`-nya benar-benar ada** (`interposeLib.exists()`), supaya kalau native build gagal,
+      efeknya "sebagian belum jalan", bukan "semua proses gagal start". Teknik sama yang dipakai
+      Termux sendiri (`termux-exec`, ikut ke-bundle di bootstrap kita) — terbukti jalan di
+      Android/bionic dengan `targetSdk=28` kita.
+- [ ] **Belum diverifikasi di device** — build pertama yang benar-benar pakai native code (NDK).
+      Risiko lebih tinggi dari fix-fix sebelumnya: kalau shim ini crash/salah, bisa bikin **semua**
+      proses (termasuk `bash` sendiri) gagal start via `LD_PRELOAD`, bukan cuma dpkg — balik ke
+      gejala "terminal blank" tapi kali ini penyebabnya beda. Kalau itu terjadi, laporkan segera;
+      fallback tercepat: hapus baris `LD_PRELOAD`/`ANDROIDKRIS_REAL_PREFIX` dari `shellEnv()`.
+      Coba lagi: `apt update && apt install -y openjdk-17` sampai tuntas (unpack + configure).
 - [ ] Setelah `java -version` jalan: pasang **Gradle** (paket Termux `gradle` 9.6.1, butuh JDK 21
       sebagai dependency menurut build script-nya — cek ulang versi JDK yang dibutuhkan) →
       prasyarat Fase 3 (Gradle sync). Android SDK/build-tools aarch64 menyusul terpisah (Termux

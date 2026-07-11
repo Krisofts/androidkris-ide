@@ -36,6 +36,8 @@ object Environment {
         private set
     lateinit var caCertFile: File
         private set
+    lateinit var interposeLib: File
+        private set
 
     fun init(context: Context) {
         root = File(context.filesDir, "ide")
@@ -47,6 +49,7 @@ object Environment {
         bash = File(bin, "bash")
         aptConfig = File(prefix, "etc/apt/apt.conf.d/00androidkris-prefix.conf")
         caCertFile = File(prefix, "etc/tls/cert.pem")
+        interposeLib = File(context.applicationInfo.nativeLibraryDir, "libinterpose.so")
     }
 
     /** True once the bootstrap is extracted and bash is executable. */
@@ -121,25 +124,40 @@ object Environment {
     }
 
     /** Environment for a login shell inside the prefix. */
-    fun shellEnv(): Array<String> = arrayOf(
-        "PREFIX=${prefix.absolutePath}",
-        "HOME=${home.absolutePath}",
-        "PATH=${bin.absolutePath}:/system/bin:/system/xbin",
-        "LD_LIBRARY_PATH=${lib.absolutePath}",
-        "TMPDIR=${tmp.absolutePath}",
-        "TERM=xterm-256color",
-        "LANG=en_US.UTF-8",
-        // apt/dpkg compile in Dir::Etc pointing at Termux's own prefix, so they never look in
-        // our etc/apt/apt.conf.d/ for the override written by writeAptConfig(). APT_CONFIG is
-        // read before any compiled-in default, bypassing that chicken-and-egg problem.
-        "APT_CONFIG=${aptConfig.absolutePath}",
-        // GnuTLS's system-trust lookup is likewise hardcoded to Termux's own prefix and finds
-        // nothing there (EACCES, it's another app's sandbox) — "No system certificates
-        // available". SSL_CERT_FILE overrides that for GnuTLS/OpenSSL alike (curl, apt's https
-        // method, anything else linked against either), pointed at the real cert.pem the
-        // bootstrap already ships.
-        "SSL_CERT_FILE=${caCertFile.absolutePath}",
-    )
+    fun shellEnv(): Array<String> {
+        val env = mutableListOf(
+            "PREFIX=${prefix.absolutePath}",
+            "HOME=${home.absolutePath}",
+            "PATH=${bin.absolutePath}:/system/bin:/system/xbin",
+            "LD_LIBRARY_PATH=${lib.absolutePath}",
+            "TMPDIR=${tmp.absolutePath}",
+            "TERM=xterm-256color",
+            "LANG=en_US.UTF-8",
+            // apt/dpkg compile in Dir::Etc pointing at Termux's own prefix, so they never look
+            // in our etc/apt/apt.conf.d/ for the override written by writeAptConfig().
+            // APT_CONFIG is read before any compiled-in default, bypassing that chicken-and-egg
+            // problem.
+            "APT_CONFIG=${aptConfig.absolutePath}",
+            // GnuTLS's system-trust lookup is likewise hardcoded to Termux's own prefix and
+            // finds nothing there (EACCES, it's another app's sandbox) — "No system
+            // certificates available". SSL_CERT_FILE overrides that for GnuTLS/OpenSSL alike
+            // (curl, apt's https method, anything else linked against either), pointed at the
+            // real cert.pem the bootstrap already ships.
+            "SSL_CERT_FILE=${caCertFile.absolutePath}",
+        )
+        // Some hardcoded Termux-prefix paths (e.g. dpkg's own config directory) have no
+        // config-file or env-var override at all — Android also flatly denies traversing
+        // another app's data dir (EACCES on the whole subtree), so there's nothing to create
+        // our way around either. interpose.c rewrites those paths at the libc call level for
+        // every process in this session; only enable it if the build actually produced the
+        // .so, so a missing/failed native build degrades to "some things still don't work"
+        // instead of every process failing to start.
+        if (interposeLib.exists()) {
+            env += "LD_PRELOAD=${interposeLib.absolutePath}"
+            env += "ANDROIDKRIS_REAL_PREFIX=${prefix.absolutePath}"
+        }
+        return env.toTypedArray()
+    }
 
     // Termux's own official bootstrap, aarch64 (bash + coreutils + apt/dpkg/curl/nano/...).
     // AndroidIDE (previously used here) was discontinued in Dec 2024 (org archived); Termux's
