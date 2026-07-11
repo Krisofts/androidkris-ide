@@ -157,13 +157,14 @@ object BootstrapInstaller {
     /**
      * `apt`/`dpkg` compile in `Dir::*` defaults pointing at Termux's own absolute prefix
      * (unlike bash, they don't fall back to our env vars). apt.conf.d overrides are the
-     * standard way to relocate them — untested end-to-end on device yet.
+     * standard way to relocate them — but apt only looks under its own compiled-in
+     * `Dir::Etc` for such files in the first place, so this one is only ever read because
+     * [Environment.shellEnv] points `APT_CONFIG` straight at it.
      */
     private fun writeAptPrefixOverride() {
         val prefix = Environment.prefix.absolutePath
-        val confDir = File(Environment.prefix, "etc/apt/apt.conf.d")
-        confDir.mkdirs()
-        File(confDir, "00androidkris-prefix.conf").writeText(
+        Environment.aptConfig.parentFile?.mkdirs()
+        Environment.aptConfig.writeText(
             """
             Dir "$prefix/";
             Dir::Bin::Methods "$prefix/lib/apt/methods/";

@@ -73,7 +73,11 @@ fun TerminalHost(
             shellPath = Environment.bash.absolutePath,
             workingDir = Environment.home.absolutePath,
             env = Environment.shellEnv(),
-            args = arrayOf("-bash"), // leading '-' => login shell
+            // Non-login: a login shell (leading '-') sources bash's compiled-in
+            // /data/data/com.termux/.../etc/profile, which our sandbox can't even stat
+            // (EACCES) — noisy and pointless since Environment.shellEnv() already sets
+            // everything a login shell's profile would.
+            args = arrayOf("bash"),
             onSessionEnd = onClose,
         )
 

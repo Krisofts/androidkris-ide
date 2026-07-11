@@ -149,12 +149,21 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
          dkk — di-generate `etc/apt/apt.conf.d/00androidkris-prefix.conf` yang override semua
          `Dir::*` ke prefix kita (`writeAptPrefixOverride()`), plus siapkan folder
          `var/lib/apt/lists/partial`, `var/cache/apt/archives/partial`, dll yang tidak ada di zip.
-- [ ] **Belum diverifikasi di device** — install ulang bootstrap (hapus data app / uninstall,
-      karena `Environment.isInstalled` cuma cek `bash.canExecute()` jadi tidak otomatis
-      reinstall), lalu di terminal coba:
-      `apt update && apt install -y openjdk-17` → cek apakah `Dir::*` override cukup atau ada
-      hardcode lain yang belum ketemu (gpgv verifikasi signature Release file jadi titik rawan
-      berikutnya kalau keyring retarget di atas ternyata belum cukup).
+- [x] **Diuji di device (putaran 1):** `apt update` gagal — `apt` sama sekali tidak baca
+      `etc/apt/apt.conf.d/00androidkris-prefix.conf` di prefix kita, karena `Dir::Etc` default
+      apt sendiri (hardcoded) masih nunjuk ke prefix Termux; override kita nggak pernah
+      "ditemukan" (chicken-and-egg). Juga kelihatan warning `-bash: .../etc/profile: Permission
+      denied` (bash login-shell coba baca profile Termux, `EACCES` karena app lain nggak
+      bisa ditelusuri di Android).
+- [x] **Fix (putaran 1):** set env var **`APT_CONFIG`** (dibaca apt sebelum default manapun,
+      resmi didukung apt) langsung ke path `apt.conf` kita di `Environment.shellEnv()` — bypass
+      masalah chicken-and-egg tanpa perlu bootstrap di-download ulang. Ganti `-bash` (login shell)
+      → `bash` biasa di `TerminalHost.kt` supaya nggak coba baca `/etc/profile` Termux sama sekali.
+- [ ] **Belum diverifikasi ulang di device** — kali ini cukup update app (APK baru), *tidak*
+      perlu reinstall bootstrap (file `apt.conf` sudah ada dari instalasi sebelumnya). Coba lagi:
+      `apt update && apt install -y openjdk-17` → kalau masih gagal, titik rawan berikutnya
+      kemungkinan verifikasi signature GPG (`gpgv`) terhadap `Release` file pakai keyring yang
+      di-retarget.
 - [ ] Setelah `java -version` jalan: pasang **Gradle** (paket Termux `gradle` 9.6.1, butuh JDK 21
       sebagai dependency menurut build script-nya — cek ulang versi JDK yang dibutuhkan) →
       prasyarat Fase 3 (Gradle sync). Android SDK/build-tools aarch64 menyusul terpisah (Termux
