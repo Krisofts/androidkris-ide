@@ -289,11 +289,42 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
       test lagi: kalau prefix masih kena hapus ROM, cek apakah re-entry ke terminal langsung
       "Memperbaiki environment (dari cache)…" dalam hitungan detik alih-alih kembali ke layar
       unduh 30 MB.
-- [ ] Setelah `java -version` jalan: pasang **Gradle** (paket Termux `gradle` 9.6.1, butuh JDK 21
-      sebagai dependency menurut build script-nya — cek ulang versi JDK yang dibutuhkan) →
-      prasyarat Fase 3 (Gradle sync). Android SDK/build-tools aarch64 menyusul terpisah (Termux
-      tidak menyediakan ini, masih perlu cari sumber lain karena AndroidIDE sudah mati).
-- **Sumber:** `github.com/termux/termux-packages` (aktif, rilis mingguan).
+- [x] **Riset: "tiru AndroidIDE" buat JDK/Gradle** — user minta refactor niru cara AndroidIDE
+      pasang JDK/Gradle setelah capek berkali-kali gagal. Dicek langsung ke source resminya
+      (`androidide-tools` — repo arsip, tapi releases/manifest.json masih bisa diakses):
+      **JDK-nya AndroidIDE sendiri pasang lewat `pkg install openjdk-$version`** — mekanisme
+      **persis sama** dengan yang sudah kita pakai (apt/dpkg Termux), cuma jalan di dalam bootstrap
+      yang mereka build ulang khusus buat path app mereka sendiri (`com.itsaky.androidide`) saat
+      compile time — sesuatu yang nggak bisa kita tiru tanpa build farm cross-compile sendiri buat
+      ratusan paket Termux. Jadi "niru AndroidIDE" untuk JDK **tidak** memberi jalan pintas.
+      **Tapi** SDK Android-nya AndroidIDE **beneran langsung tarball download+extract**, sama
+      sekali skip package manager — pola ini bisa & layak ditiru buat **Gradle**.
+- [x] **Gradle: dipasang langsung dari upstream resmi, skip Termux/apt sama sekali**
+      (`GradleInstaller.kt`, baru). Gradle itu murni JVM bytecode + launcher shell script — **tidak
+      ada build khusus aarch64**, jadi zip resminya (`services.gradle.org/distributions/
+      gradle-8.10.2-bin.zip`, SHA-256 dicocokkan manual ke `gradle.org/release-checksums/`) bisa
+      langsung dipakai, persis seperti Gradle Wrapper di desktop manapun. Ini sekaligus lepas dari
+      concern lama "paket `gradle` Termux butuh JDK 21 sebagai dependency" — nggak lagi relevan.
+      Muncul sebagai bar kecil non-modal di atas terminal begitu bash jalan (`GradleBar` di
+      `TerminalHost.kt`), bukan full-screen gate seperti bootstrap — install Gradle nggak nge-block
+      pemakaian shell buat hal lain. Pola cache+auto-repair yang sama kayak bootstrap (`hasValidCache`,
+      zip disimpan permanen) ikut diterapkan, karena extract-nya juga nulis ~2000 file + chmod satu
+      launcher script → risiko OEM-cleanup yang sama seperti bootstrap.
+- [x] **Refactor kecil:** logic download+verifySha256 yang tadinya duplikat di `BootstrapInstaller`
+      diekstrak ke `Downloader.kt` (dipakai bareng oleh `BootstrapInstaller` & `GradleInstaller`).
+- [ ] **JDK:** tetap lewat `apt install -y openjdk-17` (jalur yang sudah jauh lebih matang — semua
+      bug dpkg/apt yang pernah ditemukan sudah di-fix termasuk `.dpkg-tmp`). Blocker yang tersisa
+      murni OEM-level (MIUI/Vivo), bukan apt/dpkg lagi — lihat mitigasi cache+auto-repair +
+      rekomendasi setting OS di atas. Kalau OEM-wipe masih terjadi bahkan setelah setting device
+      diperbaiki, opsi berikutnya (belum dikerjakan, butuh keputusan): extract manual `.deb`
+      openjdk-17 (skip dpkg's dependency graph 39 paket → cuma ambil JDK-nya sendiri), tapi ini
+      butuh parser `ar`+`tar`+`xz` baru (dependency `commons-compress`+`org.tukaani:xz`) yang belum
+      diverifikasi terhadap `.deb` Termux asli — risiko tinggi buat di-ship tanpa testing langsung.
+- [ ] **Belum diverifikasi di device** (Gradle installer baru). Android SDK/build-tools aarch64
+      masih menyusul terpisah (Termux tidak menyediakan ini, AndroidIDE juga sudah mati jadi
+      binernya nggak bisa dipakai ulang — perlu sumber lain).
+- **Sumber:** `github.com/termux/termux-packages` (aktif, rilis mingguan) untuk bash/coreutils/apt;
+  `services.gradle.org` (resmi Gradle) untuk Gradle.
 
 ### Fase 3 — Gradle sync (project model) (4–8 minggu) ⚠️ tersulit
 - [ ] Pasang **Gradle aarch64 + Android build-tools + platform jar** dari distribusi AndroidIDE.

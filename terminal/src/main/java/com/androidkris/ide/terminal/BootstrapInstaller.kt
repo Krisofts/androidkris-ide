@@ -9,9 +9,6 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
-import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 
 /** Progress of the on-device Linux bootstrap installation. */
@@ -63,7 +60,7 @@ object BootstrapInstaller {
     suspend fun hasValidCache(context: Context): Boolean = withContext(Dispatchers.IO) {
         Environment.init(context)
         val zip = Environment.cachedZip
-        zip.exists() && runCatching { verifySha256(zip, Environment.BOOTSTRAP_SHA256) }.isSuccess
+        zip.exists() && runCatching { Downloader.verifySha256(zip, Environment.BOOTSTRAP_SHA256) }.isSuccess
     }
 
     suspend fun install(context: Context, onProgress: (BootstrapState) -> Unit) =
@@ -76,16 +73,17 @@ object BootstrapInstaller {
                 Environment.init(context)
                 Environment.logDiag("install() start")
                 val zip = Environment.cachedZip
-                val cached = zip.exists() && runCatching { verifySha256(zip, Environment.BOOTSTRAP_SHA256) }.isSuccess
+                val cached = zip.exists() && runCatching { Downloader.verifySha256(zip, Environment.BOOTSTRAP_SHA256) }.isSuccess
                 if (cached) {
                     Environment.logDiag("reusing cached+verified zip, size=${zip.length()} (skip download)")
                     onProgress(BootstrapState.Verifying)
                 } else {
-                    download(Environment.BOOTSTRAP_URL, zip, onProgress)
+                    onProgress(BootstrapState.Downloading(0f))
+                    Downloader.download(Environment.BOOTSTRAP_URL, zip) { onProgress(BootstrapState.Downloading(it)) }
                     Environment.logDiag("download done, size=${zip.length()}")
 
                     onProgress(BootstrapState.Verifying)
-                    runCatching { verifySha256(zip, Environment.BOOTSTRAP_SHA256) }
+                    runCatching { Downloader.verifySha256(zip, Environment.BOOTSTRAP_SHA256) }
                         .onFailure { zip.delete(); throw it } // don't keep a corrupt zip as "cache"
                     Environment.logDiag("sha256 verified")
                 }
@@ -119,46 +117,6 @@ object BootstrapInstaller {
                 installLock.unlock()
             }
         }
-
-    private fun download(url: String, out: File, onProgress: (BootstrapState) -> Unit) {
-        onProgress(BootstrapState.Downloading(0f))
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 30_000
-            readTimeout = 60_000
-            instanceFollowRedirects = true
-        }
-        conn.connect()
-        if (conn.responseCode !in 200..299) {
-            throw RuntimeException("Download gagal: HTTP ${conn.responseCode}")
-        }
-        val total = conn.contentLengthLong
-        conn.inputStream.use { input ->
-            FileOutputStream(out).use { fos ->
-                val buf = ByteArray(64 * 1024)
-                var read = 0L
-                var n: Int
-                while (input.read(buf).also { n = it } != -1) {
-                    fos.write(buf, 0, n)
-                    read += n
-                    if (total > 0) onProgress(BootstrapState.Downloading(read.toFloat() / total))
-                }
-            }
-        }
-        conn.disconnect()
-    }
-
-    private fun verifySha256(file: File, expected: String) {
-        val md = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buf = ByteArray(64 * 1024)
-            var n: Int
-            while (input.read(buf).also { n = it } != -1) md.update(buf, 0, n)
-        }
-        val actual = md.digest().joinToString("") { "%02x".format(it) }
-        if (!actual.equals(expected, ignoreCase = true)) {
-            throw RuntimeException("SHA-256 tidak cocok (file rusak)")
-        }
-    }
 
     private fun extract(zip: File) {
         val staging = File(Environment.root, "usr-staging")

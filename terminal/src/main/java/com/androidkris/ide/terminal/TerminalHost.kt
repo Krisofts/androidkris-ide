@@ -3,6 +3,7 @@ package com.androidkris.ide.terminal
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -86,18 +87,21 @@ fun TerminalHost(
             onUseSystemShell = { mode = TerminalMode.System },
         )
 
-        TerminalMode.Bash -> TerminalScreen(
-            modifier = modifier,
-            shellPath = Environment.bash.absolutePath,
-            workingDir = Environment.home.absolutePath,
-            env = Environment.shellEnv(),
-            // Non-login: a login shell (leading '-') sources bash's compiled-in
-            // /data/data/com.termux/.../etc/profile, which our sandbox can't even stat
-            // (EACCES) — noisy and pointless since Environment.shellEnv() already sets
-            // everything a login shell's profile would.
-            args = arrayOf("bash"),
-            onSessionEnd = onClose,
-        )
+        TerminalMode.Bash -> Column(modifier.fillMaxSize()) {
+            GradleBar()
+            TerminalScreen(
+                modifier = Modifier.weight(1f),
+                shellPath = Environment.bash.absolutePath,
+                workingDir = Environment.home.absolutePath,
+                env = Environment.shellEnv(),
+                // Non-login: a login shell (leading '-') sources bash's compiled-in
+                // /data/data/com.termux/.../etc/profile, which our sandbox can't even stat
+                // (EACCES) — noisy and pointless since Environment.shellEnv() already sets
+                // everything a login shell's profile would.
+                args = arrayOf("bash"),
+                onSessionEnd = onClose,
+            )
+        }
 
         TerminalMode.System -> TerminalScreen(
             modifier = modifier,
@@ -218,4 +222,70 @@ private fun BootstrapSetup(
 private fun ProgressLabel(text: String) {
     CircularProgressIndicator()
     Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+}
+
+/**
+ * Thin status/action bar shown above the terminal until Gradle is installed, then hides itself.
+ * Separate from [BootstrapSetup] on purpose: Gradle isn't part of the apt/dpkg prefix at all (see
+ * [GradleInstaller]) and installing it doesn't block using the shell for anything else, so it's a
+ * non-modal bar rather than a full-screen gate like the bootstrap install is.
+ */
+@Composable
+private fun GradleBar() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var installed by remember { mutableStateOf(Environment.isGradleInstalled) }
+    var state by remember { mutableStateOf<GradleState>(GradleState.Idle) }
+    var autoTriggered by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state) {
+        if (state is GradleState.Done) installed = true
+    }
+
+    // Same self-heal as BootstrapSetup's autoStart: Gradle's install also writes ~2000 files and
+    // chmods a launcher script, so it's exposed to the same OEM-cleanup risk as the bootstrap.
+    LaunchedEffect(Unit) {
+        if (!installed && !autoTriggered && GradleInstaller.hasValidCache(context)) {
+            autoTriggered = true
+            state = GradleState.Verifying
+            GradleInstaller.install(context) { st -> state = st }
+        }
+    }
+
+    if (installed) return
+
+    Surface(tonalElevation = 2.dp) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            when (val s = state) {
+                is GradleState.Idle, is GradleState.Failed -> {
+                    Text(
+                        if (s is GradleState.Failed) "Gradle gagal: ${s.message}" else "Gradle belum terpasang",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        if (state is GradleState.Idle || state is GradleState.Failed) {
+                            state = GradleState.Downloading(0f)
+                            scope.launch {
+                                GradleInstaller.install(context) { st -> state = st }
+                            }
+                        }
+                    }) { Text("Pasang Gradle") }
+                }
+
+                is GradleState.Downloading -> Text(
+                    "Mengunduh Gradle ${(s.fraction * 100).toInt()}%",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                is GradleState.Verifying -> Text("Memverifikasi Gradle…", style = MaterialTheme.typography.bodySmall)
+                is GradleState.Extracting -> Text("Mengekstrak Gradle…", style = MaterialTheme.typography.bodySmall)
+                is GradleState.Done -> Text("Gradle terpasang", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
 }

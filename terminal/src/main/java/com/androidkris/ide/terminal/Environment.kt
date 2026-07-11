@@ -40,6 +40,12 @@ object Environment {
         private set
     lateinit var cachedZip: File
         private set
+    lateinit var gradleHome: File
+        private set
+    lateinit var gradleBin: File
+        private set
+    lateinit var gradleCachedZip: File
+        private set
 
     fun init(context: Context) {
         root = File(context.filesDir, "ide")
@@ -57,11 +63,22 @@ object Environment {
         // (see BootstrapInstaller.hasValidCache()) can be re-extracted in seconds without
         // re-downloading 30 MB, and survives even a total wipe of `prefix` itself.
         cachedZip = File(root.parentFile, "bootstrap-aarch64.zip")
+        // Installed independently of the apt/dpkg prefix (see GradleInstaller): Gradle's official
+        // upstream distribution is pure JVM bytecode + a launcher script, no native/aarch64 build
+        // needed, so it's downloaded and extracted directly rather than via `pkg install gradle`
+        // (which pulls in Termux's own JDK version pin as a dependency).
+        gradleHome = File(root, "gradle")
+        gradleBin = File(gradleHome, "bin/gradle")
+        gradleCachedZip = File(root.parentFile, "gradle-bin.zip")
     }
 
     /** True once the bootstrap is extracted and bash is executable. */
     val isInstalled: Boolean
         get() = this::bash.isInitialized && bash.canExecute()
+
+    /** True once Gradle is extracted and its launcher script is executable. */
+    val isGradleInstalled: Boolean
+        get() = this::gradleBin.isInitialized && gradleBin.canExecute()
 
     fun ensureRuntimeDirs() {
         home.mkdirs()
@@ -161,10 +178,14 @@ object Environment {
 
     /** Environment for a login shell inside the prefix. */
     fun shellEnv(): Array<String> {
+        // Gradle's own launcher script locates `java`/`javac` via PATH if $JAVA_HOME isn't set,
+        // so putting gradleHome/bin ahead of $PREFIX/bin (which apt-installed openjdk-* symlinks
+        // into) is enough — no need to guess openjdk's exact install path for JAVA_HOME.
+        val pathPrefix = if (isGradleInstalled) "${gradleBin.parentFile!!.absolutePath}:" else ""
         val env = mutableListOf(
             "PREFIX=${prefix.absolutePath}",
             "HOME=${home.absolutePath}",
-            "PATH=${bin.absolutePath}:/system/bin:/system/xbin",
+            "PATH=$pathPrefix${bin.absolutePath}:/system/bin:/system/xbin",
             "LD_LIBRARY_PATH=${lib.absolutePath}",
             "TMPDIR=${tmp.absolutePath}",
             "TERM=xterm-256color",
