@@ -14,6 +14,10 @@ local.properties
 keystore.properties
 *.jks
 *.keystore
+# ...except the fixed debug key (app/build.gradle.kts signingConfigs.debug): debug keys are
+# insecure by design, and committing it is what keeps every build's signature identical so
+# updates install over each other without uninstalling first.
+!app/debug.keystore
 
 # On-device toolchain / large binaries fetched at runtime (Fase 2+)
 /toolchain-cache/

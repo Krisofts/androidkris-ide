@@ -28,7 +28,24 @@ android {
         }
     }
 
+    signingConfigs {
+        getByName("debug") {
+            // Fixed debug key committed to the repo (debug keys are insecure by design, safe
+            // to commit) so every build — local or CI — signs with the same key. Without this,
+            // AGP falls back to auto-generating ~/.android/debug.keystore per machine; on CI's
+            // always-fresh runners that means a different signature on every build, and Android
+            // refuses to install an update over a differently-signed app (needs uninstall first).
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
