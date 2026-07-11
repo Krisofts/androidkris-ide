@@ -62,6 +62,27 @@ object Environment {
     }
 
     /**
+     * Append-only, timestamped diagnostic trail for the install/launch sequence, written outside
+     * [prefix] (a sibling of `ide/`, directly under `filesDir`) so it survives even a total wipe
+     * of the prefix and stays readable from the Android system-shell fallback (same app UID) when
+     * the prefix's own `bin/` is gone and nothing inside it can be exec'd. Exists to catch cases
+     * where a freshly-extracted, verified-working prefix disappears moments later with no
+     * destructive command run in between — e.g. some OEM ROMs' "storage cleaner"/"memory booster"
+     * treating a burst of hundreds of small newly-written files in app-private storage as junk.
+     * Retrievable even with a fully broken bootstrap via bash's own builtin command substitution
+     * (no external `cat` needed) against the absolute path, or from the system-shell fallback
+     * with plain `cat`.
+     */
+    fun logDiag(msg: String) {
+        runCatching {
+            val f = File(root.parentFile, "install.log")
+            val ts = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.US)
+                .format(java.util.Date())
+            f.appendText("[$ts] $msg\n")
+        }
+    }
+
+    /**
      * Fixes up everything in an already-extracted prefix that still points at Termux's own
      * absolute prefix instead of ours (apt.conf + script shebangs/bodies). Idempotent and cheap
      * enough to run on every terminal launch — called from both [BootstrapInstaller] right

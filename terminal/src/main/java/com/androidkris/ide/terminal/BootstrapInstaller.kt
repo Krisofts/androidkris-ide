@@ -59,20 +59,36 @@ object BootstrapInstaller {
             }
             try {
                 Environment.init(context)
+                Environment.logDiag("install() start")
                 val zip = File(context.cacheDir, "bootstrap-aarch64.zip")
                 download(Environment.BOOTSTRAP_URL, zip, onProgress)
+                Environment.logDiag("download done, size=${zip.length()}")
 
                 onProgress(BootstrapState.Verifying)
                 verifySha256(zip, Environment.BOOTSTRAP_SHA256)
+                Environment.logDiag("sha256 verified")
 
                 onProgress(BootstrapState.Extracting)
                 extract(zip)
                 zip.delete()
+
+                // Fail loud instead of reporting Done on a silently-incomplete prefix: verify the
+                // one file everything else depends on actually landed and is executable.
+                val binCount = Environment.bin.listFiles()?.size ?: -1
+                val bashOk = Environment.bash.canExecute()
+                Environment.logDiag("extract done, bin exists=${Environment.bin.exists()} binCount=$binCount bashExecutable=$bashOk")
+                if (!bashOk) {
+                    throw RuntimeException("Verifikasi gagal: ${Environment.bash} tidak ada/tidak bisa dieksekusi setelah extract (binCount=$binCount)")
+                }
+
                 Environment.repairPrefix()
+                Environment.logDiag("repairPrefix done")
 
                 Environment.ensureRuntimeDirs()
+                Environment.logDiag("Done reported to UI")
                 onProgress(BootstrapState.Done)
             } catch (t: Throwable) {
+                Environment.logDiag("FAILED: ${t.javaClass.simpleName}: ${t.message}")
                 runCatching { cleanup() }
                 onProgress(BootstrapState.Failed("${t.javaClass.simpleName}: ${t.message}"))
             } finally {
