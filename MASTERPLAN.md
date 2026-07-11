@@ -194,12 +194,33 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
       efeknya "sebagian belum jalan", bukan "semua proses gagal start". Teknik sama yang dipakai
       Termux sendiri (`termux-exec`, ikut ke-bundle di bootstrap kita) — terbukti jalan di
       Android/bionic dengan `targetSdk=28` kita.
-- [ ] **Belum diverifikasi di device** — build pertama yang benar-benar pakai native code (NDK).
-      Risiko lebih tinggi dari fix-fix sebelumnya: kalau shim ini crash/salah, bisa bikin **semua**
-      proses (termasuk `bash` sendiri) gagal start via `LD_PRELOAD`, bukan cuma dpkg — balik ke
-      gejala "terminal blank" tapi kali ini penyebabnya beda. Kalau itu terjadi, laporkan segera;
-      fallback tercepat: hapus baris `LD_PRELOAD`/`ANDROIDKRIS_REAL_PREFIX` dari `shellEnv()`.
-      Coba lagi: `apt update && apt install -y openjdk-17` sampai tuntas (unpack + configure).
+- [x] **Diuji di device (putaran 4):** shim jalan (bash normal, error "opening configuration
+      directory" hilang total) → `apt update` sukses penuh, GPG lolos. Gagal berikutnya:
+      `dpkg-deb (subprocess): failed to chdir to directory: Permission denied` — `chdir()`
+      belum ada di daftar intercept. Fix: tambah `chdir`/`chown`/`lchown`/`truncate`/`utimes`.
+- [x] **Diuji di device (putaran 5):** lolos chdir, sampai proses **unpack semua 39 paket**
+      (termasuk openjdk-17!). Gagal di error baru: `unable to stat './data/data/com.termux'
+      (which was about to be installed): Permission denied`.
+- [x] **Ditemukan (root cause berbeda lagi):** paket resmi Termux membungkus isi `data.tar`
+      dengan path **relatif ke `/`** (mis. `./data/data/com.termux/files/usr/lib/foo`) — karena
+      root dpkg Termux sendiri memang `/`. `dpkg` menelusuri direktori itu **selangkah demi
+      selangkah** (`chdir` + `mkdir`/`stat` relatif untuk "data", lalu "data/data", lalu
+      "data/data/com.termux", dst) — bukan selalu satu path absolut utuh. Shim lama cuma cocokkan
+      path **absolut yang PERSIS diawali** prefix Termux; path relatif dan path **leluhur**
+      (ancestor, lebih pendek dari prefix Termux) lolos tanpa dialihkan → nyentuh filesystem asli
+      → `EACCES`. Sempat salah duga & coba hapus `Dir` dari `apt.conf` (supaya dpkg root balik ke
+      `/`) — ternyata itu memang **prasyarat** yang benar (dpkg WAJIB berpikir root-nya `/`,
+      persis kayak Termux, biar shim di level syscall yang nangani semuanya) — tapi butuh shim-nya
+      diperkuat dulu supaya benar-benar menangani kasus ini.
+- [x] **Fix (putaran 5):** `interpose.c` sekarang **lacak `cwd` sendiri** (refresh tiap `chdir()`
+      sukses) buat resolve path relatif, dan `rewrite_path()` jadi dua arah: (1) path yang match
+      persis/lebih dalam dari prefix Termux → tetap alihkan seperti biasa; (2) path yang jadi
+      **leluhur** dari prefix Termux (mis. `/data`, `/data/data`, dst — dpkg lagi mastiin
+      direktori perantara ada sebelum masuk lebih dalam) → dikumpulkan jadi satu, dialihkan ke
+      **root prefix kita sendiri** (yang sudah pasti ada & bisa ditulis), supaya panggilannya
+      sukses dan dpkg lanjut ke level berikutnya. `apt.conf`: baris `Dir` (root) dihapus permanen
+      (root dpkg dibiarkan default `/`, sesuai desain Termux, ditangani penuh oleh shim).
+- [ ] **Belum diverifikasi di device.**
 - [ ] Setelah `java -version` jalan: pasang **Gradle** (paket Termux `gradle` 9.6.1, butuh JDK 21
       sebagai dependency menurut build script-nya — cek ulang versi JDK yang dibutuhkan) →
       prasyarat Fase 3 (Gradle sync). Android SDK/build-tools aarch64 menyusul terpisah (Termux

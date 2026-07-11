@@ -97,13 +97,21 @@ object Environment {
     /**
      * (Re)writes the apt.conf.d override that retargets apt/dpkg's compiled-in `Dir::*`
      * defaults (Termux's own absolute prefix) at ours.
+     *
+     * Deliberately does NOT set the top-level `Dir` (root/instdir) key: Termux's own packages
+     * ship data.tar entries as paths *relative to "/"* (e.g. `./data/data/com.termux/files/usr/
+     * lib/foo`), because Termux's own dpkg root really is "/". Pointing `Dir` at our prefix
+     * made dpkg join that onto our prefix instead, producing a bogus nested
+     * "<prefix>/data/data/com.termux/..." path (confirmed on device: "unable to stat
+     * './data/data/com.termux'"). Leaving root at its natural "/" default makes dpkg construct
+     * the real absolute path (`/data/data/com.termux/files/usr/lib/foo`), which interpose.c
+     * *does* catch and redirect — that was the whole point of the syscall-level shim.
      */
     private fun writeAptConfig() {
         val p = prefix.absolutePath
         aptConfig.parentFile?.mkdirs()
         aptConfig.writeText(
             """
-            Dir "$p/";
             Dir::Bin::Methods "$p/lib/apt/methods/";
             Dir::Bin::dpkg "$p/bin/dpkg";
             Dir::Bin::apt-key "$p/bin/apt-key";

@@ -14,6 +14,7 @@
 #include <dirent.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,23 +28,69 @@ static const char *const OLD_PREFIX = "/data/data/com.termux/files/usr";
 static size_t old_prefix_len;
 static char *new_prefix;
 
+// Termux's packages ship data.tar entries as paths relative to "/" (their dpkg root really is
+// "/") — e.g. "./data/data/com.termux/files/usr/lib/foo" — and dpkg walks the chain one
+// component at a time (chdir + relative mkdir/stat for "data", then "data/data", then
+// "data/data/com.termux", ...) rather than always passing one fully-qualified absolute path.
+// So this shim needs to track cwd itself to resolve relative paths, refreshed after every
+// successful chdir().
+static char cwd_buf[PATH_MAX];
+
+static void refresh_cwd(void) {
+    if (getcwd(cwd_buf, sizeof(cwd_buf)) == NULL) {
+        cwd_buf[0] = '/';
+        cwd_buf[1] = '\0';
+    }
+}
+
 __attribute__((constructor)) static void interpose_init(void) {
     old_prefix_len = strlen(OLD_PREFIX);
     const char *env = getenv("ANDROIDKRIS_REAL_PREFIX");
     if (env != NULL) new_prefix = strdup(env);
+    refresh_cwd();
 }
 
-// Returns a malloc'd rewritten path if `path` falls under OLD_PREFIX, else NULL
-// (meaning: use the original path unchanged). Caller must free() a non-NULL result.
+// Resolves `path` to an absolute path (using our tracked cwd if it's relative) and returns a
+// malloc'd redirected path if that absolute form falls at-or-under OLD_PREFIX (normal case:
+// append the OLD_PREFIX-relative suffix onto new_prefix) or is a proper *ancestor* of
+// OLD_PREFIX (dpkg checking/creating "/data", then "/data/data", etc. on the way to the real
+// target — collapse all of those to new_prefix itself, since new_prefix already exists and is
+// ours to write to; dpkg only cares that the call succeeds so it can proceed one level
+// deeper). Returns NULL (meaning: use the original path unchanged) if neither applies.
+// Caller must free() a non-NULL result.
 static char *rewrite_path(const char *path) {
     if (path == NULL || new_prefix == NULL) return NULL;
-    if (strncmp(path, OLD_PREFIX, old_prefix_len) != 0) return NULL;
-    const char *suffix = path + old_prefix_len;
-    size_t len = strlen(new_prefix) + strlen(suffix) + 1;
-    char *out = malloc(len);
-    if (out == NULL) return NULL;
-    snprintf(out, len, "%s%s", new_prefix, suffix);
-    return out;
+
+    char resolved[PATH_MAX];
+    if (path[0] == '/') {
+        snprintf(resolved, sizeof(resolved), "%s", path);
+    } else {
+        const char *rel = path;
+        if (rel[0] == '.' && rel[1] == '/') rel += 2;
+        if (cwd_buf[0] == '/' && cwd_buf[1] == '\0') {
+            snprintf(resolved, sizeof(resolved), "/%s", rel);
+        } else {
+            snprintf(resolved, sizeof(resolved), "%s/%s", cwd_buf, rel);
+        }
+    }
+    size_t resolved_len = strlen(resolved);
+
+    if (resolved_len >= old_prefix_len && strncmp(resolved, OLD_PREFIX, old_prefix_len) == 0 &&
+        (resolved[old_prefix_len] == '/' || resolved[old_prefix_len] == '\0')) {
+        const char *suffix = resolved + old_prefix_len;
+        size_t len = strlen(new_prefix) + strlen(suffix) + 1;
+        char *out = malloc(len);
+        if (out == NULL) return NULL;
+        snprintf(out, len, "%s%s", new_prefix, suffix);
+        return out;
+    }
+
+    if (resolved_len < old_prefix_len && strncmp(OLD_PREFIX, resolved, resolved_len) == 0 &&
+        OLD_PREFIX[resolved_len] == '/') {
+        return strdup(new_prefix);
+    }
+
+    return NULL;
 }
 
 typedef int (*open_fn)(const char *, int, ...);
@@ -74,7 +121,10 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
         mode = (mode_t)va_arg(ap, int);
         va_end(ap);
     }
-    char *rewritten = rewrite_path(pathname);
+    // A relative pathname is resolved against our tracked cwd, which is only correct when
+    // dirfd is AT_FDCWD; an absolute pathname ignores dirfd entirely (same as the real
+    // openat()), so it's always safe to rewrite regardless of dirfd.
+    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path(pathname) : NULL;
     int fd = real(dirfd, rewritten != NULL ? rewritten : pathname, flags, mode);
     free(rewritten);
     return fd;
@@ -257,6 +307,7 @@ int chdir(const char *path) {
     if (real == NULL) real = (chdir_fn)dlsym(RTLD_NEXT, "chdir");
     char *rewritten = rewrite_path(path);
     int r = real(rewritten != NULL ? rewritten : path);
+    if (r == 0) refresh_cwd();
     free(rewritten);
     return r;
 }
