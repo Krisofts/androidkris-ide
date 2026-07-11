@@ -331,6 +331,60 @@ masih plain — tambah grammar-nya ke `assets/textmate/` + `languages.json` bila
 - **Sumber:** `github.com/termux/termux-packages` (aktif, rilis mingguan) untuk bash/coreutils/apt;
   `services.gradle.org` (resmi Gradle) untuk Gradle.
 
+**Fase 2.2 🔨 (pivot: PRoot + Ubuntu rootfs asli — jalur kedua, paralel ke 2.1b):**
+- [x] **Kenapa pivot:** user share dua referensi — `AndroidCSIDE/ACSIDE` (closed source, tapi
+      README-nya bilang "Terminal with Ubuntu environment") dan log nyata dari app lain
+      (`com.nullij.androidcodestudio`) yang **beneran jalan di device user**: extract
+      `sandbox.tar.xz` (54 MB) ke `files/localenv/acsenv`, isinya jelas rootfs Ubuntu/Debian asli
+      (`usr/lib/aarch64-linux-gnu/*.so`, `var/lib/dpkg/info/*:arm64.*`, usrmerge symlinks
+      `bin`/`sbin`/`lib`). Ini bukti konkret teknik PRoot+Ubuntu-rootfs beneran jalan di HP yang
+      sama/sejenis. User pilih (lewat AskUserQuestion) buat pivot ke arah ini sebagai jalur kedua,
+      **bukan pengganti** jalur bionic-Termux yang sudah jauh lebih matang (2.1b tetap jalan).
+- [x] **Kenapa ini secara fundamental beda dari 2.1b:** PRoot bikin proses tamu **benar-benar
+      percaya root-nya "/"** (translasi syscall level, bukan cuma env var/config override kayak
+      pendekatan kita di 2.1b) — jadi apt/dpkg Ubuntu di dalamnya **tidak dimodifikasi sama
+      sekali**, nggak ada kategori bug hardcoded-path yang mungkin terjadi (SYMLINKS retarget,
+      apt.conf Dir:: override, dpkg config dir butuh LD_PRELOAD — semua itu nggak relevan di sini).
+      **Tapi TIDAK memperbaiki bug OEM-wipe** (MIUI/Vivo hapus file app storage) — itu masalah
+      OS-level yang berlaku ke pendekatan manapun yang nulis+chmod banyak file.
+- [x] **Sumber proot: TIDAK bundle binary native baru yang belum tepercaya.** `proot` di-`apt
+      install` di DALAM prefix bionic yang sudah kita perbaiki habis-habisan (reuse pipeline
+      apt/dpkg yang sudah matang), bukan binary static terpisah dari sumber pihak ketiga yang
+      belum diverifikasi.
+- [x] **Sumber rootfs: Ubuntu Base resmi Canonical** (`cdimage.ubuntu.com/ubuntu-base/releases/
+      24.04/release/ubuntu-base-24.04.4-base-arm64.tar.gz`, ~30 MB terkompresi) — SHA-256
+      diverifikasi manual byte-per-byte (bukan lewat ringkasan tool apa pun) terhadap
+      `SHA256SUMS` resmi di server yang sama.
+- [x] **Implementasi:** `UbuntuInstaller.kt` (baru) — pola sama seperti `BootstrapInstaller`/
+      `GradleInstaller` (Mutex, cache+auto-repair, batched chmod buat OEM-heuristic mitigation,
+      makin penting di sini karena rootfs penuh bisa ribuan file bukan ratusan). Parsing
+      tar.gz pakai `commons-compress` (bukan hand-roll parser — rootfs asli sering pakai
+      GNU/PAX long-name extension buat path dalam, terlalu berisiko ditebak tanpa bisa
+      diuji langsung ke tarball asli). Tangani symlink (`Os.symlink`) dan hardlink (disalin
+      byte-nya, bukan `Os.link()` — filesystem Android sering nggak dukung hardlink asli,
+      alasan yang sama kenapa proot sendiri punya flag `--link2symlink`) dari tipe entry TAR
+      langsung (beda dari SYMLINKS.txt manifest terpisah di bootstrap Termux).
+      `Environment.prootEnterCommand()` nyusun invocation proot — flag-nya (`--link2symlink`,
+      `--kill-on-exit`, `-0` fake-root, bind `/dev` `/proc` `/sys`) diverifikasi langsung dari
+      source resmi `termux/proot-distro` (`proot_cmd.py`), bukan tebak-tebakan.
+- [x] **Safety fix:** `prootEnterCommand()` clear `LD_PRELOAD=` khusus buat invocation ini — shim
+      `interpose.c` (buat masalah hardcoded-path di prefix bionic) kalau ikut ke-load ke proses
+      `proot` sendiri berisiko konflik dengan translasi syscall proot sendiri (dua layer
+      interception syscall di proses yang sama).
+- [x] **UI:** `UbuntuBar` (pola sama `GradleBar`) di atas terminal — "Pasang Ubuntu" (download+
+      extract, otomatis lewat cache kalau sempat kehapus ROM), lalu kalau `proot` belum ke-apt-
+      install kasih hint jalanin `apt install -y proot` manual (tombol "Cek lagi" buat re-check
+      tanpa polling terus-terusan), baru tombol "Masuk Ubuntu" muncul — nulis command proot
+      langsung ke sesi bash yang sedang jalan (`TerminalScreen` diberi `onSessionReady` callback
+      baru buat expose referensi session ke luar).
+- [ ] **Belum diverifikasi di device sama sekali** — ini instalasi tar.gz+PRoot pertama kita,
+      nggak bisa dicompile-test lokal (no Android SDK di sandbox ini), apalagi dites end-to-end.
+      Setelah `apt install -y proot` jalan, cek `apt update && apt install -y openjdk-17` di
+      DALAM Ubuntu proot — kalau ini kerja tanpa satupun fix hardcoded-path yang pernah dibutuhkan
+      di 2.1b, itu konfirmasi kuat pivot ini bernilai buat JDK/Gradle/toolchain ke depannya.
+- **Sumber:** `cdimage.ubuntu.com` (resmi Canonical, Ubuntu Base rootfs); `termux/proot-distro`
+  (referensi flag proot, open source, bukan source yang kita bundle).
+
 ### Fase 3 — Gradle sync (project model) (4–8 minggu) ⚠️ tersulit
 - [ ] Pasang **Gradle aarch64 + Android build-tools + platform jar** dari distribusi AndroidIDE.
 - [ ] Sambung **Gradle Tooling API**: jalankan Gradle daemon, ambil model project (module, sumber,

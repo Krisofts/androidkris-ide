@@ -38,6 +38,7 @@ fun TerminalScreen(
     args: Array<String>? = null,
     textSizeSp: Int = 14,
     onSessionEnd: () -> Unit = {},
+    onSessionReady: (TerminalSession) -> Unit = {},
 ) {
     // One-slot holder so the extra-keys row and onRelease can reach the session.
     val holder = remember { arrayOfNulls<TerminalSession>(1) }
@@ -80,6 +81,7 @@ fun TerminalScreen(
                     ),
                 )
                 holder[0] = session
+                onSessionReady(session)
                 view.attachSession(session)
                 view.requestFocus()
                 showKeyboard(ctx, view)

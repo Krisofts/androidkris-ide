@@ -48,6 +48,12 @@ object Environment {
         private set
     lateinit var javaHome: File
         private set
+    lateinit var ubuntuRootfs: File
+        private set
+    lateinit var ubuntuCachedTar: File
+        private set
+    lateinit var prootBin: File
+        private set
 
     fun init(context: Context) {
         root = File(context.filesDir, "ide")
@@ -76,6 +82,14 @@ object Environment {
         // `openjdk-*` package we do via apt): it sets JAVA_HOME to "$PREFIX/opt/openjdk" after
         // install, not a version-specific subdirectory.
         javaHome = File(prefix, "opt/openjdk")
+        // Genuine Ubuntu (glibc) rootfs entered via `proot` from inside the bionic bash prefix
+        // above (see UbuntuInstaller). Unlike the bionic prefix, apt/dpkg inside here are
+        // completely unmodified — proot makes the guest genuinely believe its root is "/", so
+        // none of the hardcoded-Termux-path categories of bugs (SYMLINKS retargeting, apt.conf
+        // Dir:: overrides, dpkg config dir, LD_PRELOAD) apply at all.
+        ubuntuRootfs = File(root, "ubuntu")
+        ubuntuCachedTar = File(root.parentFile, "ubuntu-base-arm64.tar.gz")
+        prootBin = File(bin, "proot")
     }
 
     /** True once the bootstrap is extracted and bash is executable. */
@@ -85,6 +99,40 @@ object Environment {
     /** True once Gradle is extracted and its launcher script is executable. */
     val isGradleInstalled: Boolean
         get() = this::gradleBin.isInitialized && gradleBin.canExecute()
+
+    /** True once the Ubuntu rootfs is extracted (a marker file is only written on full success). */
+    val isUbuntuInstalled: Boolean
+        get() = this::ubuntuRootfs.isInitialized && File(ubuntuRootfs, "etc/os-release").exists()
+
+    /** True once `proot` was apt-installed into the bionic prefix (see UbuntuInstaller). */
+    val isProotInstalled: Boolean
+        get() = this::prootBin.isInitialized && prootBin.canExecute()
+
+    /**
+     * The shell command (typed into the already-running bash session, not a separate
+     * TerminalSession) that enters the Ubuntu rootfs as fake-root via proot. Flags follow
+     * Termux's own `proot-distro` tool (termux/proot-distro, proot_cmd.py): `--link2symlink`
+     * works around some Android filesystems lacking real hardlink support, `--kill-on-exit`
+     * ensures proot's tracer process doesn't linger after the shell exits, `-0` is fake-root
+     * (simpler than proot-distro's full uid-mapping, fine for a single-user container), and the
+     * three binds are the minimum proot needs to translate `/dev`, `/proc`, `/sys` lookups from
+     * inside the rootfs. `env -i` resets to a clean environment so none of the bionic prefix's
+     * own PATH/LD_LIBRARY_PATH/etc leak into the (glibc) Ubuntu userland.
+     */
+    fun prootEnterCommand(): String {
+        val r = ubuntuRootfs.absolutePath
+        // LD_PRELOAD= clears interpose.c for this one invocation (bash's `VAR= cmd` prefix syntax
+        // scopes it to just this command, doesn't touch the running shell's own environment).
+        // interpose.c does libc-level syscall interposition for the bionic prefix's own
+        // hardcoded-Termux-path problem (see shellEnv()) — loading it into `proot` itself would
+        // mean two different syscall-interception layers stacking in the same process, and proot
+        // already depends on precise, unmodified libc/ptrace behavior to do its own translation.
+        return "LD_PRELOAD= ${prootBin.absolutePath} --link2symlink --kill-on-exit -0 " +
+            "-r $r -b /dev -b /proc -b /sys -w /root " +
+            "/usr/bin/env -i HOME=/root TERM=\$TERM " +
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+            "/bin/bash --login"
+    }
 
     fun ensureRuntimeDirs() {
         home.mkdirs()

@@ -46,4 +46,11 @@ dependencies {
     // artifact here — terminal-view pulls no Guava, so that empty stub only *removes* the real
     // ListenableFuture class and breaks androidx.concurrent.futures / ProfileInstaller at runtime.
     implementation(libs.termux.terminal.view)
+
+    // Pure-Java tar reader for UbuntuInstaller (Ubuntu Base rootfs ships as .tar.gz; java.util.zip
+    // has no tar support at all). Real Ubuntu rootfs tarballs use GNU/PAX long-name extensions
+    // for deep paths, which a hand-rolled reader risks getting subtly wrong with no way to test
+    // against a real tarball outside a device — commons-compress is a battle-tested Apache
+    // project instead. No native code, no other runtime deps pulled in for plain tar+gzip.
+    implementation("org.apache.commons:commons-compress:1.26.2")
 }

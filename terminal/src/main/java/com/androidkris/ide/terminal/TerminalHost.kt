@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.termux.terminal.TerminalSession
 import kotlinx.coroutines.launch
 
 private enum class TerminalMode { Loading, Setup, Bash, System }
@@ -87,20 +88,27 @@ fun TerminalHost(
             onUseSystemShell = { mode = TerminalMode.System },
         )
 
-        TerminalMode.Bash -> Column(modifier.fillMaxSize()) {
-            GradleBar()
-            TerminalScreen(
-                modifier = Modifier.weight(1f),
-                shellPath = Environment.bash.absolutePath,
-                workingDir = Environment.home.absolutePath,
-                env = Environment.shellEnv(),
-                // Non-login: a login shell (leading '-') sources bash's compiled-in
-                // /data/data/com.termux/.../etc/profile, which our sandbox can't even stat
-                // (EACCES) — noisy and pointless since Environment.shellEnv() already sets
-                // everything a login shell's profile would.
-                args = arrayOf("bash"),
-                onSessionEnd = onClose,
-            )
+        TerminalMode.Bash -> {
+            var activeSession by remember { mutableStateOf<TerminalSession?>(null) }
+            Column(modifier.fillMaxSize()) {
+                GradleBar()
+                UbuntuBar(sendCommand = { cmd ->
+                    activeSession?.let { s -> val b = cmd.toByteArray(); s.write(b, 0, b.size) }
+                })
+                TerminalScreen(
+                    modifier = Modifier.weight(1f),
+                    shellPath = Environment.bash.absolutePath,
+                    workingDir = Environment.home.absolutePath,
+                    env = Environment.shellEnv(),
+                    // Non-login: a login shell (leading '-') sources bash's compiled-in
+                    // /data/data/com.termux/.../etc/profile, which our sandbox can't even stat
+                    // (EACCES) — noisy and pointless since Environment.shellEnv() already sets
+                    // everything a login shell's profile would.
+                    args = arrayOf("bash"),
+                    onSessionEnd = onClose,
+                    onSessionReady = { activeSession = it },
+                )
+            }
         }
 
         TerminalMode.System -> TerminalScreen(
@@ -285,6 +293,94 @@ private fun GradleBar() {
                 is GradleState.Verifying -> Text("Memverifikasi Gradle…", style = MaterialTheme.typography.bodySmall)
                 is GradleState.Extracting -> Text("Mengekstrak Gradle…", style = MaterialTheme.typography.bodySmall)
                 is GradleState.Done -> Text("Gradle terpasang", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+/**
+ * Bar for the second, independent environment: a genuine Ubuntu rootfs entered via `proot` (see
+ * [UbuntuInstaller] and [Environment.prootEnterCommand]). Unlike the bionic prefix, apt/dpkg
+ * inside there are completely unmodified — no hardcoded-path bugs are possible by construction.
+ * `proot` itself isn't auto-installed here (unlike the Ubuntu rootfs download) — it's a single
+ * `apt install -y proot` the user runs in the same bash session like any other package, reusing
+ * the already-hardened apt/dpkg pipeline instead of adding a separate native-binary trust
+ * decision. A manual "Cek lagi" button re-checks for it since the bar can't observe a file
+ * appearing from a command typed directly into the terminal without polling.
+ */
+@Composable
+private fun UbuntuBar(sendCommand: (String) -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var installed by remember { mutableStateOf(Environment.isUbuntuInstalled) }
+    var state by remember { mutableStateOf<UbuntuState>(UbuntuState.Idle) }
+    var autoTriggered by remember { mutableStateOf(false) }
+    var refreshTick by remember { mutableStateOf(0) }
+    val prootReady = remember(refreshTick, state) { Environment.isProotInstalled }
+
+    LaunchedEffect(state) {
+        if (state is UbuntuState.Done) installed = true
+    }
+
+    LaunchedEffect(Unit) {
+        if (!installed && !autoTriggered && UbuntuInstaller.hasValidCache(context)) {
+            autoTriggered = true
+            state = UbuntuState.Verifying
+            UbuntuInstaller.install(context) { st -> state = st }
+        }
+    }
+
+    Surface(tonalElevation = 2.dp) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            when (val s = state) {
+                is UbuntuState.Idle, is UbuntuState.Failed -> {
+                    if (installed) {
+                        if (prootReady) {
+                            Text(
+                                "Ubuntu siap",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { sendCommand(Environment.prootEnterCommand() + "\n") }) {
+                                Text("Masuk Ubuntu")
+                            }
+                        } else {
+                            Text(
+                                "Ubuntu siap — jalankan 'apt install -y proot' dulu",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { refreshTick++ }) { Text("Cek lagi") }
+                        }
+                    } else {
+                        Text(
+                            if (s is UbuntuState.Failed) "Ubuntu gagal: ${s.message}" else "Ubuntu (proot) belum terpasang",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = {
+                            if (state is UbuntuState.Idle || state is UbuntuState.Failed) {
+                                state = UbuntuState.Downloading(0f)
+                                scope.launch {
+                                    UbuntuInstaller.install(context) { st -> state = st }
+                                }
+                            }
+                        }) { Text("Pasang Ubuntu") }
+                    }
+                }
+
+                is UbuntuState.Downloading -> Text(
+                    "Mengunduh Ubuntu ${(s.fraction * 100).toInt()}%",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                is UbuntuState.Verifying -> Text("Memverifikasi Ubuntu…", style = MaterialTheme.typography.bodySmall)
+                is UbuntuState.Extracting -> Text("Mengekstrak Ubuntu…", style = MaterialTheme.typography.bodySmall)
+                is UbuntuState.Done -> Text("Ubuntu terpasang", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
