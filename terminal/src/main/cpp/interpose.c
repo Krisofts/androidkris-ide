@@ -56,7 +56,7 @@ __attribute__((constructor)) static void interpose_init(void) {
 // /data/data/com.termux and fails with EACCES — safe, if occasionally blocking, since nothing
 // of ours gets touched). Caller must free() a non-NULL result.
 //
-// Two cases:
+// Three cases, the third gated behind `allow_suffix`:
 //   1. `resolved` is at-or-under OLD_PREFIX exactly (the common case: an actual file/dir under
 //      the target) — append the OLD_PREFIX-relative suffix onto new_prefix. Requires a
 //      component boundary on *both* sides, so e.g. ".../usr" doesn't wrongly match
@@ -64,16 +64,27 @@ __attribute__((constructor)) static void interpose_init(void) {
 //   2. `resolved` is *exactly* one of OLD_PREFIX's own ancestor directories, with nothing else
 //      appended ("/data", "/data/data", "/data/data/com.termux", ...) — dpkg confirming/
 //      creating an intermediate directory on the way down. Collapses straight to new_prefix
-//      (no suffix), since new_prefix already exists and is ours to write to, and dpkg only
-//      needs the call to succeed so it can proceed one level deeper.
+//      (no suffix): safe for any caller, since new_prefix already exists and is ours to write
+//      to, and dpkg only needs the call to succeed so it can proceed one level deeper.
+//   3. `resolved` is one of those same ancestor directories *plus some other suffix* — e.g.
+//      dpkg's defensive "remove any stale .dpkg-tmp/.dpkg-new left over from a previous
+//      interrupted run" pre-cleanup pass, unconditional on every tar entry and confirmed (by
+//      reading dpkg's own source) to run standalone, not as the second half of a same-run
+//      rename: "/data/data/com.termux/files" -> ".../files.dpkg-tmp". Grafting this onto
+//      new_prefix + suffix is safe *for read/remove-only callers* (stat/access/unlink/rmdir/
+//      opendir/...): the target never exists, so it resolves to a harmless ENOENT that such
+//      cleanup code already tolerates by design.
 //
-// Deliberately narrow: a path that's an ancestor *plus some other suffix* (e.g. dpkg's
-// "securely remove by rename" trick, "/data/data/com.termux/files" ->
-// ".../files.dpkg-tmp") is NOT redirected, even though it looks similar. Collapsing every
-// ancestor-shaped path to new_prefix would mean a rename-then-recursive-delete of an ancestor
-// resolves to renaming-then-deleting new_prefix *itself* — i.e. wiping the entire bootstrap.
-// Better to let that one case fail loudly than risk destroying the user's install.
-static char *rewrite_path(const char *path) {
+//      This must stay OFF for rename()/link()/symlink()/open(): dpkg *does* separately do a
+//      real "move aside to install new version" rename of a conflicting path onto the same
+//      kind of suffixed name (a different code path from the defensive cleanup above). If that
+//      ever targets one of OLD_PREFIX's bare ancestors, case 2 would redirect its source to
+//      new_prefix itself — and if case 3 were also active for rename's destination, the two
+//      together would rename (and then have the caller recursively delete) new_prefix, i.e.
+//      the entire bootstrap. Leaving suffix redirection off for those calls means that specific
+//      rename still fails safely against the real, inaccessible Termux path instead, exactly
+//      as it does today.
+static char *rewrite_path_ex(const char *path, int allow_suffix) {
     if (path == NULL || new_prefix == NULL) return NULL;
 
     char resolved[PATH_MAX];
@@ -105,7 +116,36 @@ static char *rewrite_path(const char *path) {
         return strdup(new_prefix);
     }
 
+    if (allow_suffix) {
+        for (size_t i = old_prefix_len; i >= 1; i--) {
+            size_t boundary = i - 1;
+            if (OLD_PREFIX[boundary] != '/' || boundary == 0) continue;
+            if (resolved_len <= boundary) continue;
+            if (strncmp(resolved, OLD_PREFIX, boundary) != 0) continue;
+            const char *suffix = resolved + boundary;
+            size_t len = strlen(new_prefix) + strlen(suffix) + 1;
+            char *out = malloc(len);
+            if (out == NULL) return NULL;
+            snprintf(out, len, "%s%s", new_prefix, suffix);
+            return out;
+        }
+    }
+
     return NULL;
+}
+
+// Narrow: exact/deeper matches and bare ancestors only. Use for anything that can create,
+// move, or write through a path (open/openat/fopen/rename/link/symlink/chdir/mkdir/chmod/
+// chown/execve/...).
+static char *rewrite_path(const char *path) {
+    return rewrite_path_ex(path, 0);
+}
+
+// Loose: also grafts ancestor-plus-suffix paths onto new_prefix. Use only for read-only or
+// remove-only calls (stat/lstat/access/unlink/rmdir/opendir/scandir and their *at() forms) —
+// see the case-3 comment on rewrite_path_ex() for why this must not spread to writing calls.
+static char *rewrite_path_loose(const char *path) {
+    return rewrite_path_ex(path, 1);
 }
 
 typedef int (*open_fn)(const char *, int, ...);
@@ -159,7 +199,7 @@ typedef DIR *(*opendir_fn)(const char *);
 DIR *opendir(const char *name) {
     static opendir_fn real = NULL;
     if (real == NULL) real = (opendir_fn)dlsym(RTLD_NEXT, "opendir");
-    char *rewritten = rewrite_path(name);
+    char *rewritten = rewrite_path_loose(name);
     DIR *d = real(rewritten != NULL ? rewritten : name);
     free(rewritten);
     return d;
@@ -177,7 +217,7 @@ int scandir(const char *dirp, struct dirent ***namelist,
             int (*compar)(const struct dirent **, const struct dirent **)) {
     static scandir_fn real = NULL;
     if (real == NULL) real = (scandir_fn)dlsym(RTLD_NEXT, "scandir");
-    char *rewritten = rewrite_path(dirp);
+    char *rewritten = rewrite_path_loose(dirp);
     int r = real(rewritten != NULL ? rewritten : dirp, namelist, filter, compar);
     free(rewritten);
     return r;
@@ -187,7 +227,7 @@ typedef int (*stat_fn)(const char *, struct stat *);
 int stat(const char *path, struct stat *buf) {
     static stat_fn real = NULL;
     if (real == NULL) real = (stat_fn)dlsym(RTLD_NEXT, "stat");
-    char *rewritten = rewrite_path(path);
+    char *rewritten = rewrite_path_loose(path);
     int r = real(rewritten != NULL ? rewritten : path, buf);
     free(rewritten);
     return r;
@@ -196,7 +236,7 @@ int stat(const char *path, struct stat *buf) {
 int lstat(const char *path, struct stat *buf) {
     static stat_fn real = NULL;
     if (real == NULL) real = (stat_fn)dlsym(RTLD_NEXT, "lstat");
-    char *rewritten = rewrite_path(path);
+    char *rewritten = rewrite_path_loose(path);
     int r = real(rewritten != NULL ? rewritten : path, buf);
     free(rewritten);
     return r;
@@ -206,7 +246,7 @@ typedef int (*access_fn)(const char *, int);
 int access(const char *path, int mode) {
     static access_fn real = NULL;
     if (real == NULL) real = (access_fn)dlsym(RTLD_NEXT, "access");
-    char *rewritten = rewrite_path(path);
+    char *rewritten = rewrite_path_loose(path);
     int r = real(rewritten != NULL ? rewritten : path, mode);
     free(rewritten);
     return r;
@@ -231,7 +271,7 @@ typedef int (*unlink_fn)(const char *);
 int unlink(const char *path) {
     static unlink_fn real = NULL;
     if (real == NULL) real = (unlink_fn)dlsym(RTLD_NEXT, "unlink");
-    char *rewritten = rewrite_path(path);
+    char *rewritten = rewrite_path_loose(path);
     int r = real(rewritten != NULL ? rewritten : path);
     free(rewritten);
     return r;
@@ -241,7 +281,7 @@ typedef int (*rmdir_fn)(const char *);
 int rmdir(const char *path) {
     static rmdir_fn real = NULL;
     if (real == NULL) real = (rmdir_fn)dlsym(RTLD_NEXT, "rmdir");
-    char *rewritten = rewrite_path(path);
+    char *rewritten = rewrite_path_loose(path);
     int r = real(rewritten != NULL ? rewritten : path);
     free(rewritten);
     return r;
@@ -378,7 +418,7 @@ typedef int (*unlinkat_fn)(int, const char *, int);
 int unlinkat(int dirfd, const char *pathname, int flags) {
     static unlinkat_fn real = NULL;
     if (real == NULL) real = (unlinkat_fn)dlsym(RTLD_NEXT, "unlinkat");
-    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path(pathname) : NULL;
+    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path_loose(pathname) : NULL;
     int r = real(dirfd, rewritten != NULL ? rewritten : pathname, flags);
     free(rewritten);
     return r;
@@ -450,7 +490,7 @@ typedef int (*faccessat_fn)(int, const char *, int, int);
 int faccessat(int dirfd, const char *pathname, int mode, int flags) {
     static faccessat_fn real = NULL;
     if (real == NULL) real = (faccessat_fn)dlsym(RTLD_NEXT, "faccessat");
-    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path(pathname) : NULL;
+    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path_loose(pathname) : NULL;
     int r = real(dirfd, rewritten != NULL ? rewritten : pathname, mode, flags);
     free(rewritten);
     return r;
@@ -460,7 +500,7 @@ typedef int (*fstatat_fn)(int, const char *, struct stat *, int);
 int fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
     static fstatat_fn real = NULL;
     if (real == NULL) real = (fstatat_fn)dlsym(RTLD_NEXT, "fstatat");
-    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path(pathname) : NULL;
+    char *rewritten = (dirfd == AT_FDCWD || pathname[0] == '/') ? rewrite_path_loose(pathname) : NULL;
     int r = real(dirfd, rewritten != NULL ? rewritten : pathname, buf, flags);
     free(rewritten);
     return r;
